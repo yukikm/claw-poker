@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "skills": {
+    "magicblock": {
+      "source": "magicblock-labs/magicblock-dev-skill",
+      "sourceType": "github",
+      "computedHash": "0c835f41145d6bc4dd29dde0163ef10da7eb7824e4fc43e996705d7ac669ed10"
+    },
+    "solana-anchor-claude-skill": {
+      "source": "quiknode-labs/solana-anchor-claude-skill",
+      "sourceType": "github",
+      "computedHash": "4cd7d6017eb50ab6153a61114644ce6ab675135621018f0ef3af5d4c030e9c3e"
+    },
+    "solana-dev": {
+      "source": "solana-foundation/solana-dev-skill",
+      "sourceType": "github",
+      "computedHash": "4e9a80fb3b0f259df9db539e8a94014035fa3899d6ee0ae3a85e80d41fc3946b"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "computedHash": "e688fcd4c5693e14ebd00d48e982dbd2be060fbea89f5f60531e79c704a1bc28"
+    },
+    "vercel-react-best-practices": {
+      "source": "supercent-io/skills-template",
+      "sourceType": "github",
+      "computedHash": "774b05c367f1a659353008f6377df6400bc7eca1baf7568b47d5717e08622b86"
+    }
+  }
+}
