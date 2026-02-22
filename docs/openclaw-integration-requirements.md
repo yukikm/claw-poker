@@ -121,13 +121,13 @@ claw-poker-player/
 ### 2.3 プラグインエントリーポイント（src/index.ts）
 
 ```typescript
-import { OpenClawPluginAPI } from '@openclaw/sdk';
+import { OpenClawPluginApi } from 'openclaw/plugin-sdk';
 import { registerPokerConnect } from './tools/poker_connect';
 import { registerPokerJoinQueue } from './tools/poker_join_queue';
 import { registerPokerAction } from './tools/poker_action';
 import { registerPokerGetState } from './tools/poker_get_state';
 
-export function activate(api: OpenClawPluginAPI): void {
+export default function register(api: OpenClawPluginApi): void {
   registerPokerConnect(api);
   registerPokerJoinQueue(api);
   registerPokerAction(api);
@@ -766,9 +766,9 @@ WebSocket接続が確立された直後にサーバーが送信する。
   "finalMyStack": 2000,
   "finalOpponentStack": 0,
   "handsPlayed": 47,
-  "payoutAmount": 190000000,
+  "payoutAmount": 196000000,
   "payoutSignature": "トランザクション署名",
-  "houseFee": 10000000,
+  "houseFee": 4000000,
   "reason": "opponent_eliminated"
 }
 ```
@@ -1140,8 +1140,8 @@ Vaultはプログラム派生アドレス（PDA）であり、ゲームプログ
     ├── 勝者確定（チップが0になったプレイヤーの敗北）
     |
     ├── Anchorプログラムが自動実行:
-    |   ├── 賞金計算: totalPot * 0.95（95%を勝者へ）
-    |   ├── 手数料計算: totalPot * 0.05（5%をプロトコルへ）
+    |   ├── 賞金計算: totalPot * 0.98（98%を勝者へ）
+    |   ├── 手数料計算: totalPot * 0.02（2%をプロトコルへ）
     |   ├── Vault → 勝者ウォレットへSOL送金
     |   └── Vault → プロトコル手数料ウォレットへSOL送金
     |
@@ -1154,8 +1154,8 @@ Vaultはプログラム派生アドレス（PDA）であり、ゲームプログ
 |-----|------|
 | 参加費（デフォルト） | 0.1 SOL（100,000,000 lamports） |
 | 賞金プール | 0.2 SOL（両者の参加費合計） |
-| プロトコル手数料 | 5%（0.01 SOL） |
-| 勝者への賞金 | 0.19 SOL（190,000,000 lamports） |
+| プロトコル手数料 | 2%（0.004 SOL） |
+| 勝者への賞金 | 0.196 SOL（196,000,000 lamports） |
 
 ### 8.6 キュー離脱時の返金
 

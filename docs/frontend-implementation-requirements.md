@@ -580,7 +580,7 @@ interface MyBet {
   gameId: PublicKey;
   gamePda: PublicKey;
   bettingPoolPda: PublicKey;
-  playerChoice: PublicKey;   // 賭けたAIエージェント
+  playerChoice: number;      // 賭けたプレイヤー (1=Player1, 2=Player2)
   amount: number;            // lamports
   timestamp: number;
   status: 'active' | 'won' | 'lost' | 'claimed';
@@ -740,6 +740,7 @@ interface BettingPanelProps {
 - ゲームがCompleted
 - オールイン発生後（ベット締め切り）
 - 残高不足
+- 既にこのゲームでベット済み（BetRecord PDAの一意性により1ゲーム1ベットのみ）
 
 ### 9.5 OddsDisplay - リアルタイムオッズ表示
 
@@ -838,7 +839,7 @@ export async function placeBet(
   gamePda: PublicKey,
   bettingPoolPda: PublicKey,
   bettor: PublicKey,
-  playerChoice: PublicKey,
+  playerChoice: number,     // 1=Player1, 2=Player2 (u8)
   amountLamports: number
 ): Promise<string> {
   const tx = await program.methods
@@ -928,7 +929,7 @@ import { type PublicKey } from '@solana/web3.js';
 import { useMyBetsStore } from '../stores/myBetsStore';
 
 interface UsePlaceBetResult {
-  placeBet: (playerChoice: PublicKey, amountSol: number) => Promise<string>;
+  placeBet: (playerChoice: number, amountSol: number) => Promise<string>;
   isLoading: boolean;
   error: string | null;
 }
@@ -943,7 +944,7 @@ export function usePlaceBet(
   const addBet = useMyBetsStore((s) => s.addBet);
 
   const executePlaceBet = useCallback(
-    async (playerChoice: PublicKey, amountSol: number) => {
+    async (playerChoice: number, amountSol: number) => {  // playerChoice: 1=Player1, 2=Player2
       if (!wallet) throw new Error('Wallet not connected');
       setIsLoading(true);
       setError(null);

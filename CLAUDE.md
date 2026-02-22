@@ -49,6 +49,8 @@ MagicBlock Private Ephemeral Rollup-based P2P Texas Hold'em poker game where Ope
 - `/app/hooks`: React hooks for wallet, game state, MagicBlock PER
 - `/app/stores`: Zustand state management stores
 
+**Tech Stack**: Next.js 14, `@solana/wallet-adapter-react` (Phantom/Solflare), `@solana/kit`, Tailwind CSS, shadcn/ui, Zustand, Framer Motion
+
 ### Solana Programs
 
 - `/programs`: Anchor programs
@@ -67,7 +69,7 @@ MagicBlock Private Ephemeral Rollup-based P2P Texas Hold'em poker game where Ope
 - **MagicBlock PER**: Use dual connection pattern (Base Layer + PER)
 - **Card Privacy**: Player hole cards are encrypted in TEE, only visible to owner
 - **VRF Shuffling**: Card deck uses verifiable random function for provable fairness
-- **Timeout Handling**: AI agents have 30 seconds per action, auto-fold on timeout
+- **Timeout Handling**: AI agents have 30 seconds per action, auto-fold on timeout; **3 consecutive timeouts = forfeit loss** (`MAX_CONSECUTIVE_TIMEOUTS = 3`)
 - **x402 Integration**: Entry fees and payouts handled via x402 payment protocol
 - **WebSocket Protocol**: Real-time game state updates use WSS with authentication tokens
 
@@ -75,18 +77,18 @@ MagicBlock Private Ephemeral Rollup-based P2P Texas Hold'em poker game where Ope
 
 Use these @docs references to access complete specifications:
 
-- **@docs/business-requirements**: Product requirements, business model, revenue projections, and go-to-market strategy
-- **@docs/solana-anchor**: Solana/Anchor program architecture, account structures, x402 payment integration
-- **@docs/technical-requirements**: MagicBlock PER architecture, privacy model, session lifecycle, performance targets
-- **@docs/game-specification**: Complete Texas Hold'em rules, betting sequences, VRF shuffling, edge cases
-- **@docs/openclaw-integration**: OpenClaw AI agent integration, SKILL.md template, WebSocket protocol, action interface
-- **@docs/frontend-requirements**: Next.js 14 implementation, Solana wallet adapter, dual connection management, Zustand stores
-- **@docs/ui-ux-guidelines**: Design system, color palette, animations, accessibility (WCAG 2.1 AA), responsive breakpoints
+- **@docs/business-requirements** → `docs/business-requirements.md`: Product requirements, business model, revenue projections, and go-to-market strategy
+- **@docs/solana-anchor** → `docs/solana-anchor-requirements.md`: Solana/Anchor program architecture, account structures, x402 payment integration
+- **@docs/technical-requirements** → `docs/TECHNICAL_REQUIREMENTS.md`: MagicBlock PER architecture, privacy model, session lifecycle, performance targets
+- **@docs/game-specification** → `docs/GAME_SPECIFICATION.md`: Complete Texas Hold'em rules, betting sequences, VRF shuffling, edge cases
+- **@docs/openclaw-integration** → `docs/openclaw-integration-requirements.md`: OpenClaw AI agent integration, SKILL.md template, WebSocket protocol, action interface
+- **@docs/frontend-requirements** → `docs/frontend-implementation-requirements.md`: Next.js 14 implementation, Solana wallet adapter, dual connection management, Zustand stores
+- **@docs/ui-ux-guidelines** → `docs/ui-ux-design-guidelines.md`: Design system, color palette, animations, accessibility (WCAG 2.1 AA), responsive breakpoints
 
 ## Key Technical Decisions
 
 1. **Privacy**: Using MagicBlock Private Ephemeral Rollup approach
-2. **Commitment Strategy**: PerRound (balance between UX and cost)
+2. **Commitment Strategy**: Multi-hand with 50-hand checkpoints (commit_game on chip_stack=0; intermediate L1 checkpoint every 50 hands via `last_checkpoint_hand`)
 3. **Performance Target**: <100ms action execution time
 4. **State Management**: Hybrid (hot state in PER, settlements on L1)
 5. **AI Integration**: WebSocket-based event-driven architecture
