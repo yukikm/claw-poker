@@ -32,6 +32,8 @@ export interface GameState {
   bettingPoolPda: PublicKey;
   dealerPosition: number;
   lastRaiseAmount: number;
+  showdownCardsP1: CardDisplay[];
+  showdownCardsP2: CardDisplay[];
 }
 
 export interface GameSummary {

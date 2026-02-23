@@ -9,6 +9,7 @@ interface PhaseIndicatorProps {
 
 const PHASE_LABELS: Record<string, string> = {
   Waiting: 'ウェイティング',
+  Shuffling: 'シャッフル中',
   PreFlop: 'プリフロップ',
   Flop: 'フロップ',
   Turn: 'ターン',
@@ -19,6 +20,7 @@ const PHASE_LABELS: Record<string, string> = {
 
 const PHASE_COLORS: Record<string, string> = {
   Waiting: 'text-slate-400 border-slate-500/30',
+  Shuffling: 'text-blue-300 border-blue-500/30',
   PreFlop: 'text-cyan-300 border-cyan-500/30',
   Flop: 'text-green-300 border-green-500/30',
   Turn: 'text-yellow-300 border-yellow-500/30',

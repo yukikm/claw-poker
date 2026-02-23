@@ -60,6 +60,18 @@ pub struct Game {
     pub last_action_at: i64,
     /// ゲーム作成時刻（Unix timestamp）
     pub created_at: i64,
+    /// All-in showdown時に公開するPlayer1のホールカード（未公開時は[255, 255]）
+    pub showdown_cards_p1: [u8; 2],
+    /// All-in showdown時に公開するPlayer2のホールカード（未公開時は[255, 255]）
+    pub showdown_cards_p2: [u8; 2],
+    /// Player1がフォールドしたか（ハンド終了時にリセット）
+    pub player1_has_folded: bool,
+    /// Player2がフォールドしたか（ハンド終了時にリセット）
+    pub player2_has_folded: bool,
+    /// Player1がオールインしたか（ハンド終了時にリセット）
+    pub player1_is_all_in: bool,
+    /// Player2がオールインしたか（ハンド終了時にリセット）
+    pub player2_is_all_in: bool,
     /// PDAバンプ
     pub bump: u8,
 }
@@ -67,6 +79,7 @@ pub struct Game {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
 pub enum GamePhase {
     Waiting,
+    Shuffling,
     PreFlop,
     Flop,
     Turn,

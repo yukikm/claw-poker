@@ -2,16 +2,11 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::access_control::instructions::{
     CreatePermission, CreatePermissionInstructionArgs,
 };
-use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs};
+use ephemeral_rollups_sdk::access_control::structs::MembersArgs;
 use crate::state::Game;
 
 pub fn handler(ctx: Context<CreatePermissionGame>, game_id: u64) -> Result<()> {
     let game = &ctx.accounts.game;
-    let members = vec![
-        Member { flags: 0, pubkey: game.player1 },
-        Member { flags: 0, pubkey: game.player2 },
-        Member { flags: 0, pubkey: game.operator },
-    ];
 
     let ix = CreatePermission {
         permissioned_account: ctx.accounts.game.key(),
@@ -20,7 +15,7 @@ pub fn handler(ctx: Context<CreatePermissionGame>, game_id: u64) -> Result<()> {
         system_program: System::id(),
     }
     .instruction(CreatePermissionInstructionArgs {
-        args: MembersArgs { members: Some(members) },
+        args: MembersArgs { members: None }, // パブリック: 観戦者含め全員が読める
     });
 
     let game_id_bytes = game_id.to_le_bytes();

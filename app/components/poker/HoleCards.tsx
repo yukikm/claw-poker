@@ -1,9 +1,11 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { type CardDisplay } from '@/lib/types';
+import { cardDisplayString } from '@/lib/format';
 
 interface HoleCardsProps {
-  isRevealed: boolean;
+  cards?: CardDisplay[];
   position: 'left' | 'right';
 }
 
@@ -26,14 +28,44 @@ function CardBack({ delay = 0 }: { delay?: number }) {
   );
 }
 
-export function HoleCards({ isRevealed, position }: HoleCardsProps) {
+function CardFace({ card, delay = 0 }: { card: CardDisplay; delay?: number }) {
+  const isRed = card.suit === 'Hearts' || card.suit === 'Diamonds';
+  return (
+    <motion.div
+      initial={{ opacity: 0, rotateY: 180 }}
+      animate={{ opacity: 1, rotateY: 0 }}
+      transition={{ duration: 0.4, delay, ease: 'easeOut' }}
+      className={`
+        w-[60px] h-[84px] md:w-[90px] md:h-[126px] rounded-lg border-2 border-white/80 shadow-card
+        flex items-center justify-center text-xl md:text-3xl font-bold
+        bg-white ${isRed ? 'text-red-600' : 'text-slate-900'}
+      `}
+      aria-label={cardDisplayString(card)}
+    >
+      {cardDisplayString(card)}
+    </motion.div>
+  );
+}
+
+export function HoleCards({ cards, position }: HoleCardsProps) {
+  const isRevealed = cards && cards.length === 2 && cards.every(c => !c.isUnknown);
+
   return (
     <div
       className={`flex gap-1 md:gap-2 ${position === 'left' ? '' : 'flex-row-reverse'}`}
       aria-label={`ホールカード（${isRevealed ? '公開済み' : '非公開'}）`}
     >
-      <CardBack delay={0} />
-      <CardBack delay={0.15} />
+      {isRevealed ? (
+        <>
+          <CardFace card={cards[0]} delay={0} />
+          <CardFace card={cards[1]} delay={0.15} />
+        </>
+      ) : (
+        <>
+          <CardBack delay={0} />
+          <CardBack delay={0.15} />
+        </>
+      )}
     </div>
   );
 }

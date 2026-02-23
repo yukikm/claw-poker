@@ -1,5 +1,12 @@
-import { Connection } from '@solana/web3.js';
-import { SOLANA_RPC_URL, SOLANA_WS_URL, MAGICBLOCK_ER_RPC_URL, MAGICBLOCK_ER_WS_URL } from './constants';
+import { Connection, PublicKey } from '@solana/web3.js';
+import { getAuthToken, verifyTeeRpcIntegrity } from '@magicblock-labs/ephemeral-rollups-sdk';
+import { SOLANA_RPC_URL, SOLANA_WS_URL, MAGICBLOCK_ER_RPC_URL, MAGICBLOCK_ER_WS_URL, MAGICBLOCK_TEE_RPC_URL, MAGICBLOCK_TEE_WS_URL } from './constants';
+
+const MAGICBLOCK_TEE_RPC = MAGICBLOCK_TEE_RPC_URL;
+const MAGICBLOCK_TEE_WSS = MAGICBLOCK_TEE_WS_URL;
+
+// Permission PDA導出
+const PERMISSION_PROGRAM_ID = new PublicKey('ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1');
 
 let connectionInstance: Connection | null = null;
 
@@ -24,3 +31,41 @@ export function getERConnection(): Connection {
   }
   return erConnectionInstance;
 }
+
+/**
+ * TEE RPC の信頼性を検証する。アプリ初期化時に一度呼ぶことを推奨。
+ */
+export async function verifyTEE(): Promise<boolean> {
+  return verifyTeeRpcIntegrity(MAGICBLOCK_TEE_RPC);
+}
+
+/**
+ * AIエージェント（プレイヤー）用のTEE認証済みコネクションを作成する。
+ * 認証トークンには有効期限があるため、エラー時は再取得が必要。
+ * 観戦者には不要（Game accountはパブリック）。
+ */
+export async function getTEEConnection(
+  publicKey: PublicKey,
+  signMessage: (message: Uint8Array) => Promise<Uint8Array>
+): Promise<Connection> {
+  const token = await getAuthToken(
+    MAGICBLOCK_TEE_RPC,
+    publicKey,
+    signMessage
+  );
+  return new Connection(
+    `${MAGICBLOCK_TEE_RPC}?token=${token}`,
+    {
+      commitment: 'processed',
+      wsEndpoint: `${MAGICBLOCK_TEE_WSS}?token=${token}`,
+    }
+  );
+}
+
+export function findPermissionPda(permissionedAccount: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('permission:'), permissionedAccount.toBuffer()],
+    PERMISSION_PROGRAM_ID,
+  );
+}
+

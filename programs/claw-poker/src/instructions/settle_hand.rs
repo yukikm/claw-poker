@@ -137,6 +137,12 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
     game.pot = 0;
     game.board_cards = [255u8; 5];
     game.deck_commitment = [0u8; 32];
+    game.player1_has_folded = false;
+    game.player2_has_folded = false;
+    game.player1_is_all_in = false;
+    game.player2_is_all_in = false;
+    game.showdown_cards_p1 = [255u8; 2];
+    game.showdown_cards_p2 = [255u8; 2];
     game.phase = GamePhase::Waiting;
 
     // ゲーム終了判定: チップスタック枯渇
@@ -148,14 +154,18 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
         game.winner = Some(game.player1);
     }
 
-    // ゲーム終了判定: MAX_HAND_NUMBER到達（チップリードが勝者）
+    // ゲーム終了判定: MAX_HAND_NUMBER到達（チップリードが勝者、同点は追加ハンド継続）
     if game.phase != GamePhase::Finished && game.hand_number >= MAX_HAND_NUMBER {
-        game.phase = GamePhase::Finished;
-        if p1_state.chip_stack >= p2_state.chip_stack {
-            game.winner = Some(game.player1);
-        } else {
-            game.winner = Some(game.player2);
+        if p1_state.chip_stack != p2_state.chip_stack {
+            // チップ差がある場合のみFinished
+            game.phase = GamePhase::Finished;
+            if p1_state.chip_stack > p2_state.chip_stack {
+                game.winner = Some(game.player1);
+            } else {
+                game.winner = Some(game.player2);
+            }
         }
+        // 同点の場合: Finishedにしない -> 追加ハンド継続
     }
 
     // 50ハンドチェックポイント更新

@@ -35,7 +35,7 @@ function PlayingCard({ card, index }: { card: CardDisplay; index: number }) {
 
 export function CommunityCards({ cards, phase }: CommunityCardsProps) {
   const visibleCount = {
-    Waiting: 0, PreFlop: 0, Flop: 3, Turn: 4, River: 5, Showdown: 5, Finished: 5,
+    Waiting: 0, Shuffling: 0, PreFlop: 0, Flop: 3, Turn: 4, River: 5, Showdown: 5, Finished: 5,
   }[phase] ?? 0;
 
   const displayCards = cards.slice(0, 5).map((card, i) =>

@@ -6,6 +6,7 @@ interface GameStatusBadgeProps {
 
 const PHASE_CONFIG: Record<string, { label: string; className: string }> = {
   Waiting: { label: 'ウェイティング', className: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
+  Shuffling: { label: 'シャッフル中', className: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
   PreFlop: { label: 'プリフロップ', className: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
   Flop: { label: 'フロップ', className: 'bg-green-500/20 text-green-300 border-green-500/30' },
   Turn: { label: 'ターン', className: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' },

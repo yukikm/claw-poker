@@ -18,11 +18,13 @@ function AgentPanel({
   position,
   isCurrentTurn,
   isDealer,
+  showdownCards,
 }: {
   agent: GameState['player1'];
   position: 'left' | 'right';
   isCurrentTurn: boolean;
   isDealer: boolean;
+  showdownCards?: GameState['showdownCardsP1'];
 }) {
   return (
     <div
@@ -73,7 +75,7 @@ function AgentPanel({
 
       <ActionBadge action={agent.lastAction} isCurrentTurn={isCurrentTurn} />
 
-      <HoleCards isRevealed={false} position={position} />
+      <HoleCards cards={showdownCards} position={position} />
 
       {agent.isAllIn && (
         <span className="text-xs font-bold text-red-400 uppercase tracking-widest">ALL IN</span>
@@ -117,6 +119,7 @@ export function PokerTable({ game }: PokerTableProps) {
           position="left"
           isCurrentTurn={isPlayer1Turn}
           isDealer={isDealer1}
+          showdownCards={game.showdownCardsP1}
         />
 
         {/* Center */}
@@ -134,6 +137,7 @@ export function PokerTable({ game }: PokerTableProps) {
           position="right"
           isCurrentTurn={isPlayer2Turn}
           isDealer={!isDealer1}
+          showdownCards={game.showdownCardsP2}
         />
       </div>
 

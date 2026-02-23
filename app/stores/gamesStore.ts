@@ -30,6 +30,7 @@ interface GamesStore {
 function parsePhase(phase: Record<string, unknown>): GamePhase {
   const phaseMap: Record<string, GamePhase> = {
     waiting: 'Waiting',
+    shuffling: 'Shuffling',
     preFlop: 'PreFlop',
     flop: 'Flop',
     turn: 'Turn',
@@ -41,7 +42,7 @@ function parsePhase(phase: Record<string, unknown>): GamePhase {
   return phaseMap[key] ?? 'Waiting';
 }
 
-const IN_PROGRESS_PHASES: GamePhase[] = ['PreFlop', 'Flop', 'Turn', 'River', 'Showdown'];
+const IN_PROGRESS_PHASES: GamePhase[] = ['Shuffling', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown'];
 
 export const useGamesStore = create<GamesStore>((set) => ({
   games: [],

@@ -34,6 +34,7 @@ interface WatchGameStore {
 function parsePhase(phase: Record<string, unknown>): GamePhase {
   const phaseMap: Record<string, GamePhase> = {
     waiting: 'Waiting',
+    shuffling: 'Shuffling',
     preFlop: 'PreFlop',
     flop: 'Flop',
     turn: 'Turn',
@@ -76,16 +77,16 @@ function mapGameAccount(
       address: player1Key,
       chips: (rawGame.player1ChipStack as { toNumber(): number }).toNumber(),
       chipsCommitted: (rawGame.player1Committed as { toNumber(): number }).toNumber(),
-      hasFolded: false,
-      isAllIn: false,
+      hasFolded: (rawGame.player1HasFolded as boolean) ?? false,
+      isAllIn: (rawGame.player1IsAllIn as boolean) ?? false,
       lastAction: null,
     },
     player2: {
       address: player2Key,
       chips: (rawGame.player2ChipStack as { toNumber(): number }).toNumber(),
       chipsCommitted: (rawGame.player2Committed as { toNumber(): number }).toNumber(),
-      hasFolded: false,
-      isAllIn: false,
+      hasFolded: (rawGame.player2HasFolded as boolean) ?? false,
+      isAllIn: (rawGame.player2IsAllIn as boolean) ?? false,
       lastAction: null,
     },
     player1Key,
@@ -94,6 +95,8 @@ function mapGameAccount(
     bettingPoolPda,
     dealerPosition: rawGame.dealerPosition as number,
     lastRaiseAmount: (rawGame.lastRaiseAmount as { toNumber(): number }).toNumber(),
+    showdownCardsP1: (rawGame.showdownCardsP1 as number[]).map(decodeCard),
+    showdownCardsP2: (rawGame.showdownCardsP2 as number[]).map(decodeCard),
   };
 }
 
@@ -170,11 +173,11 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
       ],
     });
 
-    // 初期状態を読み込み、PlayerState PDAs の購読も設定
+    // 初期状態を読み込み（Game + BettingPool のみ）
     Promise.all([
       erConnection.getAccountInfo(gamePda),
       connection.getAccountInfo(bettingPoolPda),
-    ]).then(async ([gameInfo, poolInfo]) => {
+    ]).then(([gameInfo, poolInfo]) => {
       let gameState: GameState | null = null;
 
       if (gameInfo) {
@@ -198,78 +201,6 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
           }
           set({ bettingPool: pool });
         } catch { /* デコードエラーは無視 */ }
-      }
-
-      // GameState が取得できた場合、PlayerState PDAs を購読して hasFolded/isAllIn を同期
-      if (gameState) {
-        const gameIdBuffer = Buffer.alloc(8);
-        new DataView(gameIdBuffer.buffer).setBigUint64(0, gameState.gameId, true);
-
-        const [p1StatePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('player_state'), gameIdBuffer, gameState.player1Key.toBuffer()],
-          programId
-        );
-        const [p2StatePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('player_state'), gameIdBuffer, gameState.player2Key.toBuffer()],
-          programId
-        );
-
-        // 初期 PlayerState 読み込み
-        const [p1Info, p2Info] = await Promise.all([
-          erConnection.getAccountInfo(p1StatePda).catch(() => null),
-          erConnection.getAccountInfo(p2StatePda).catch(() => null),
-        ]);
-
-        if (p1Info) {
-          try {
-            const raw = program.coder.accounts.decode('PlayerState', Buffer.from(p1Info.data));
-            set((s) => s.game ? {
-              game: { ...s.game, player1: { ...s.game.player1, hasFolded: raw.isFolded as boolean, isAllIn: raw.isAllIn as boolean } },
-            } : {});
-          } catch { /* デコードエラーは無視 */ }
-        }
-        if (p2Info) {
-          try {
-            const raw = program.coder.accounts.decode('PlayerState', Buffer.from(p2Info.data));
-            set((s) => s.game ? {
-              game: { ...s.game, player2: { ...s.game.player2, hasFolded: raw.isFolded as boolean, isAllIn: raw.isAllIn as boolean } },
-            } : {});
-          } catch { /* デコードエラーは無視 */ }
-        }
-
-        // PlayerState 変更を購読（ER 上）
-        const p1SubId = erConnection.onAccountChange(
-          p1StatePda,
-          (accountInfo) => {
-            try {
-              const raw = program.coder.accounts.decode('PlayerState', Buffer.from(accountInfo.data));
-              set((s) => s.game ? {
-                game: { ...s.game, player1: { ...s.game.player1, hasFolded: raw.isFolded as boolean, isAllIn: raw.isAllIn as boolean } },
-              } : {});
-            } catch { /* デコードエラーは無視 */ }
-          },
-          'confirmed'
-        );
-        const p2SubId = erConnection.onAccountChange(
-          p2StatePda,
-          (accountInfo) => {
-            try {
-              const raw = program.coder.accounts.decode('PlayerState', Buffer.from(accountInfo.data));
-              set((s) => s.game ? {
-                game: { ...s.game, player2: { ...s.game.player2, hasFolded: raw.isFolded as boolean, isAllIn: raw.isAllIn as boolean } },
-              } : {});
-            } catch { /* デコードエラーは無視 */ }
-          },
-          'confirmed'
-        );
-
-        set((s) => ({
-          subscriptionEntries: [
-            ...s.subscriptionEntries,
-            { id: p1SubId, connection: erConnection },
-            { id: p2SubId, connection: erConnection },
-          ],
-        }));
       }
 
       set({ isLoading: false });

@@ -7,7 +7,7 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const MIN_BET_LAMPORTS = 100_000_000; // 0.1 SOL
 export const MAX_BET_LAMPORTS = 10_000_000_000; // 10 SOL
 
-export const GAME_PHASES = ['Waiting', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown', 'Finished'] as const;
+export const GAME_PHASES = ['Waiting', 'Shuffling', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown', 'Finished'] as const;
 export type GamePhase = typeof GAME_PHASES[number];
 
 export const CARD_SUITS = ['Spades', 'Diamonds', 'Clubs', 'Hearts'] as const;
@@ -18,3 +18,7 @@ export const CARD_UNKNOWN = 255;
 // MagicBlock Ephemeral Rollup endpoints
 export const MAGICBLOCK_ER_RPC_URL = process.env.NEXT_PUBLIC_MAGICBLOCK_ER_RPC_URL ?? 'https://devnet.magicblock.app';
 export const MAGICBLOCK_ER_WS_URL = process.env.NEXT_PUBLIC_MAGICBLOCK_ER_WS_URL ?? 'wss://devnet.magicblock.app';
+
+// MagicBlock TEE (Private Ephemeral Rollup) endpoints
+export const MAGICBLOCK_TEE_RPC_URL = process.env.NEXT_PUBLIC_MAGICBLOCK_TEE_RPC_URL ?? 'https://tee.magicblock.app';
+export const MAGICBLOCK_TEE_WS_URL = process.env.NEXT_PUBLIC_MAGICBLOCK_TEE_WS_URL ?? 'wss://tee.magicblock.app';

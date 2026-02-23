@@ -23,6 +23,7 @@ custom-panic = []
 [dependencies]
 anchor-lang = "0.32.1"
 ephemeral-rollups-sdk = { version = "0.8.0", features = ["anchor", "access-control"] }
+ephemeral-vrf-sdk = { version = "0.2.3", features = ["anchor"] }
 sha2 = { version = "0.10", default-features = false }
 
 

@@ -83,6 +83,27 @@ pub mod claw_poker {
         delegate_player::handler_player2(ctx, game_id)
     }
 
+    pub fn delegate_permission_game(
+        ctx: Context<DelegatePermissionGame>,
+        game_id: u64,
+    ) -> Result<()> {
+        delegate_permission_game::handler(ctx, game_id)
+    }
+
+    pub fn delegate_permission_player1(
+        ctx: Context<DelegatePermissionPlayer1>,
+        game_id: u64,
+    ) -> Result<()> {
+        delegate_permission_player::handler_player1(ctx, game_id)
+    }
+
+    pub fn delegate_permission_player2(
+        ctx: Context<DelegatePermissionPlayer2>,
+        game_id: u64,
+    ) -> Result<()> {
+        delegate_permission_player::handler_player2(ctx, game_id)
+    }
+
     pub fn initialize_betting_pool(
         ctx: Context<InitializeBettingPool>,
         game_id: u64,
@@ -118,12 +139,19 @@ pub mod claw_poker {
     // TEE Instructions (PER内実行)
     // ============================================================
 
-    pub fn shuffle_and_deal(
-        ctx: Context<ShuffleAndDeal>,
+    pub fn request_shuffle(
+        ctx: Context<RequestShuffle>,
         game_id: u64,
-        random_seed: [u8; 32],
+        client_seed: u8,
     ) -> Result<()> {
-        shuffle_and_deal::handler(ctx, game_id, random_seed)
+        request_shuffle::handler(ctx, game_id, client_seed)
+    }
+
+    pub fn callback_deal(
+        ctx: Context<CallbackDeal>,
+        randomness: [u8; 32],
+    ) -> Result<()> {
+        callback_deal::handler(ctx, randomness)
     }
 
     pub fn player_action(
@@ -142,6 +170,13 @@ pub mod claw_poker {
         board_cards: Vec<u8>,
     ) -> Result<()> {
         reveal_community_cards::handler(ctx, game_id, phase, board_cards)
+    }
+
+    pub fn reveal_showdown_cards(
+        ctx: Context<RevealShowdownCards>,
+        game_id: u64,
+    ) -> Result<()> {
+        reveal_showdown_cards::handler(ctx, game_id)
     }
 
     pub fn settle_hand(ctx: Context<SettleHand>, game_id: u64) -> Result<()> {

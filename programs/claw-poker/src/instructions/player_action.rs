@@ -38,6 +38,11 @@ pub fn handler(
     match action {
         PlayerAction::Fold => {
             player_state.is_folded = true;
+            if is_player1 {
+                game.player1_has_folded = true;
+            } else {
+                game.player2_has_folded = true;
+            }
             // ベッティングラウンド終了: ゲームサーバーがsettle_handを呼び出す
             // current_turnをゼロアドレスに設定してベッティング終了を示す
             game.current_turn = Pubkey::default();
@@ -71,6 +76,11 @@ pub fn handler(
                     .ok_or(PokerError::PotOverflow)?;
                 player_state.chip_stack = 0;
                 player_state.is_all_in = true;
+                if is_player1 {
+                    game.player1_is_all_in = true;
+                } else {
+                    game.player2_is_all_in = true;
+                }
                 game.pot = game.pot.checked_add(all_in).ok_or(PokerError::PotOverflow)?;
                 game.betting_closed = true;
             } else {
@@ -163,6 +173,11 @@ pub fn handler(
                 .ok_or(PokerError::PotOverflow)?;
             player_state.chip_stack = 0;
             player_state.is_all_in = true;
+            if is_player1 {
+                game.player1_is_all_in = true;
+            } else {
+                game.player2_is_all_in = true;
+            }
             game.pot = game.pot.checked_add(all_in_amount).ok_or(PokerError::PotOverflow)?;
             game.betting_closed = true;
 

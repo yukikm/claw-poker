@@ -12,7 +12,7 @@ interface GameListProps {
   limit?: number;
 }
 
-const IN_PROGRESS_PHASES: GamePhase[] = ['PreFlop', 'Flop', 'Turn', 'River', 'Showdown'];
+const IN_PROGRESS_PHASES: GamePhase[] = ['Shuffling', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown'];
 
 export function GameList({ filter = 'all', limit }: GameListProps) {
   const { connection } = useConnection();

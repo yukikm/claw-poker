@@ -7,14 +7,18 @@ pub mod create_permission_game;
 pub mod create_permission_player;
 pub mod delegate_game;
 pub mod delegate_player;
+pub mod delegate_permission_player;
+pub mod delegate_permission_game;
 pub mod initialize_betting_pool;
 pub mod place_spectator_bet;
 pub mod close_betting_pool;
 pub mod resolve_game;
 pub mod claim_betting_reward;
-pub mod shuffle_and_deal;
+pub mod request_shuffle;
+pub mod callback_deal;
 pub mod player_action;
 pub mod reveal_community_cards;
+pub mod reveal_showdown_cards;
 pub mod settle_hand;
 pub mod start_new_hand;
 pub mod commit_game;
@@ -41,6 +45,10 @@ pub use delegate_game::*;
 #[allow(ambiguous_glob_reexports)]
 pub use delegate_player::*;
 #[allow(ambiguous_glob_reexports)]
+pub use delegate_permission_player::*;
+#[allow(ambiguous_glob_reexports)]
+pub use delegate_permission_game::*;
+#[allow(ambiguous_glob_reexports)]
 pub use initialize_betting_pool::*;
 #[allow(ambiguous_glob_reexports)]
 pub use place_spectator_bet::*;
@@ -51,11 +59,15 @@ pub use resolve_game::*;
 #[allow(ambiguous_glob_reexports)]
 pub use claim_betting_reward::*;
 #[allow(ambiguous_glob_reexports)]
-pub use shuffle_and_deal::*;
+pub use request_shuffle::*;
+#[allow(ambiguous_glob_reexports)]
+pub use callback_deal::*;
 #[allow(ambiguous_glob_reexports)]
 pub use player_action::*;
 #[allow(ambiguous_glob_reexports)]
 pub use reveal_community_cards::*;
+#[allow(ambiguous_glob_reexports)]
+pub use reveal_showdown_cards::*;
 #[allow(ambiguous_glob_reexports)]
 pub use settle_hand::*;
 #[allow(ambiguous_glob_reexports)]
