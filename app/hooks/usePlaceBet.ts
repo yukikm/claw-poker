@@ -44,9 +44,8 @@ export function usePlaceBet() {
         programId
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const txSig = await (program as any).methods
-        .placeSpectatorBet(gameId, playerChoice, new BN(amount))
+      const txSig = await program.methods
+        .placeSpectatorBet(new BN(gameId.toString()), playerChoice, new BN(amount))
         .accounts({
           bettingPool: bettingPoolPda,
           game: gamePda,

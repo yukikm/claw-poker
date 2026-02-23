@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use crate::state::{Game, GamePhase, PlayerState};
 use crate::state::game::PlayerAction;
 use crate::errors::PokerError;
-use anchor_lang::solana_program::pubkey::Pubkey;
 
 pub fn handler(
     ctx: Context<DoPlayerAction>,
@@ -50,8 +49,16 @@ pub fn handler(
 
         PlayerAction::Check => {
             require!(my_committed == opp_committed, PokerError::InvalidAction);
-            // ターンを相手に切り替え
-            game.current_turn = opponent_key;
+            if game.phase == GamePhase::PreFlop {
+                // PreFlopでcommitted額が等しい = BBのオプション行使Check → Flop遷移シグナル
+                game.current_turn = Pubkey::default();
+            } else if was_action_taken {
+                // PostFlop: 2人目のCheckでラウンド終了シグナル
+                game.current_turn = Pubkey::default();
+            } else {
+                // PostFlop: 1人目のCheck → ターンを相手に切り替え
+                game.current_turn = opponent_key;
+            }
         }
 
         PlayerAction::Call => {
@@ -125,9 +132,12 @@ pub fn handler(
 
         PlayerAction::Bet => {
             let bet_amount = amount.ok_or(PokerError::InvalidAction)?;
-            // 現在ベットが0であることを確認
+            // Betは両者の現ラウンドcommitted額が等しい（誰もベットしていない）時のみ有効。
+            // ポストフロップではsettle_hand / start_new_handでcommitted額がリセットされるため
+            // 0 == 0となりBetが有効になる。
+            // プリフロップではブラインド投入後にcommittedが非0になるため、SBはRaiseを使う。
             require!(
-                game.player1_committed == 0 && game.player2_committed == 0,
+                my_committed == opp_committed,
                 PokerError::InvalidAction
             );
             require!(bet_amount >= game.current_big_blind, PokerError::InvalidRaise);
@@ -247,6 +257,7 @@ pub struct DoPlayerAction<'info> {
         bump = game.bump,
         constraint = game.phase != GamePhase::Waiting @ PokerError::InvalidAction,
         constraint = game.phase != GamePhase::Finished @ PokerError::GameAlreadyCompleted,
+        constraint = operator.key() == game.operator @ PokerError::PermissionDenied,
     )]
     pub game: Account<'info, Game>,
     #[account(
@@ -256,5 +267,10 @@ pub struct DoPlayerAction<'info> {
         has_one = player @ PokerError::PlayerNotInGame,
     )]
     pub player_state: Account<'info, PlayerState>,
-    pub player: Signer<'info>,
+    /// CHECK: Player identity verified by player_state has_one constraint and game.current_turn check.
+    /// The TEE operator signs transactions on behalf of players in the Private Ephemeral Rollup.
+    pub player: AccountInfo<'info>,
+    /// TEE operator signs on behalf of the player (MagicBlock PER pattern).
+    /// Authorized by game.operator constraint above.
+    pub operator: Signer<'info>,
 }

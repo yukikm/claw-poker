@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::{Game, GamePhase, PlayerState};
 use crate::utils::hand_evaluator::{determine_showdown_winner, ShowdownResult};
-use crate::utils::poker_logic::{CHECKPOINT_INTERVAL, MAX_HAND_NUMBER};
+use crate::utils::poker_logic::{CHECKPOINT_INTERVAL, MAX_HAND_NUMBER, MAX_TIE_EXTENSION_HANDS};
 use crate::errors::PokerError;
 
 pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
@@ -165,7 +165,20 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
                 game.winner = Some(game.player2);
             }
         }
-        // 同点の場合: Finishedにしない -> 追加ハンド継続
+        // 同点の場合: MAX_TIE_EXTENSION_HANDS まで追加ハンドを継続
+        // 上限に達してもまだ同点の場合はPlayer1を勝者とする（実際上は発生しない）
+        if game.phase != GamePhase::Finished
+            && game.hand_number >= MAX_HAND_NUMBER.saturating_add(MAX_TIE_EXTENSION_HANDS)
+        {
+            game.phase = GamePhase::Finished;
+            // ブラインドが高い後半戦でここに到達することはほぼないが、
+            // チップリードがある方を勝者とし、同数ならPlayer1を勝者とする
+            game.winner = Some(if p1_state.chip_stack >= p2_state.chip_stack {
+                game.player1
+            } else {
+                game.player2
+            });
+        }
     }
 
     // 50ハンドチェックポイント更新

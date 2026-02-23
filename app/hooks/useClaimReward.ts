@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 import { useAnchorProgram, getProgramId } from '@/lib/anchor';
 import { useMyBetsStore } from '@/stores/myBetsStore';
 
@@ -38,9 +39,8 @@ export function useClaimReward() {
         programId
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const txSig = await (program as any).methods
-        .claimBettingReward(gameId)
+      const txSig = await program.methods
+        .claimBettingReward(new BN(gameId.toString()))
         .accounts({
           bettingPool: bettingPoolPda,
           game: gamePda,

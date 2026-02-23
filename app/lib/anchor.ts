@@ -1,16 +1,18 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Program, AnchorProvider, Idl } from '@coral-xyz/anchor';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
+import type { Idl } from '@coral-xyz/anchor';
 import { useAnchorWallet, useConnection } from '@solana/wallet-adapter-react';
 import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import idl from './claw_poker_idl.json';
+import ClawPokerIdlJson from './claw_poker_idl.json';
 import { PROGRAM_ID } from './constants';
 
 export type { Program };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type ClawPokerProgram = Program<any>;
+export const ClawPokerIdl = ClawPokerIdlJson as Idl;
+
+export type ClawPokerProgram = Program<Idl>;
 
 export function useAnchorProgram(): ClawPokerProgram | null {
   const { connection } = useConnection();
@@ -23,7 +25,7 @@ export function useAnchorProgram(): ClawPokerProgram | null {
       commitment: 'confirmed',
     });
 
-    return new Program(idl as Idl, provider);
+    return new Program(ClawPokerIdl, provider);
   }, [connection, wallet]);
 }
 
@@ -40,8 +42,8 @@ const _dummyWallet = {
 };
 
 export function getReadOnlyProgram(connection: Connection): ClawPokerProgram {
-  const provider = new AnchorProvider(connection, _dummyWallet as never, {
+  const provider = new AnchorProvider(connection, _dummyWallet as ConstructorParameters<typeof AnchorProvider>[1], {
     commitment: 'confirmed',
   });
-  return new Program(idl as Idl, provider);
+  return new Program(ClawPokerIdl, provider);
 }

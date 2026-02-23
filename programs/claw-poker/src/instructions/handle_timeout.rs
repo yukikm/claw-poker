@@ -35,14 +35,27 @@ pub fn handler(ctx: Context<HandleTimeout>, _game_id: u64) -> Result<()> {
         }
     }
 
-    // タイムアウトしたプレイヤーのハンドをフォールド
-    ctx.accounts.timed_out_player_state.is_folded = true;
-    if is_player1_turn {
-        game.player1_has_folded = true;
+    // ベットに直面しているかどうかで自動アクションを分岐
+    if game.player1_committed != game.player2_committed {
+        // ベットに直面している場合: 自動Fold
+        ctx.accounts.timed_out_player_state.is_folded = true;
+        if is_player1_turn {
+            game.player1_has_folded = true;
+        } else {
+            game.player2_has_folded = true;
+        }
+        game.current_turn = Pubkey::default();
     } else {
-        game.player2_has_folded = true;
+        // ベットに直面していない場合: 自動Check
+        if game.phase == GamePhase::PreFlop {
+            // PreFlopでcommitted額が等しい = BBのオプション行使Check → Flop遷移シグナル
+            game.current_turn = Pubkey::default();
+        } else {
+            // PostFlop: ターンを相手に移す
+            let opponent = if is_player1_turn { game.player2 } else { game.player1 };
+            game.current_turn = opponent;
+        }
     }
-    game.current_turn = Pubkey::default();
 
     // last_action_atをリセット（次ハンドのタイムアウトクロック再スタート）
     game.last_action_at = clock.unix_timestamp;

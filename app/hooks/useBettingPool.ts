@@ -14,22 +14,34 @@ export function useBettingPool(bettingPoolPda: PublicKey | null) {
   useEffect(() => {
     if (!bettingPoolPda) return;
 
+    function decodeRawPool(rawPool: Record<string, unknown>): BettingPoolState {
+      return {
+        gameId: BigInt(String(rawPool.gameId)),
+        totalBetPlayer1: (rawPool.totalBetPlayer1 as { toNumber(): number }).toNumber(),
+        totalBetPlayer2: (rawPool.totalBetPlayer2 as { toNumber(): number }).toNumber(),
+        betCount: rawPool.betCount as number,
+        isClosed: rawPool.isClosed as boolean,
+        winner: rawPool.winner as PublicKey | null,
+        distributed: rawPool.distributed as boolean,
+      };
+    }
+
+    // 初期状態をフェッチ
+    connection.getAccountInfo(bettingPoolPda).then((accountInfo) => {
+      if (!accountInfo) return;
+      try {
+        const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(accountInfo.data)) as Record<string, unknown>;
+        setPool(decodeRawPool(rawPool));
+      } catch (err) { console.error('[useBettingPool] Initial BettingPool decode error:', err); }
+    }).catch((err) => console.error('[useBettingPool] Initial fetch error:', err));
+
     const subId = connection.onAccountChange(
       bettingPoolPda,
       (accountInfo) => {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(accountInfo.data)) as any;
-          setPool({
-            gameId: BigInt(rawPool.gameId.toString()),
-            totalBetPlayer1: (rawPool.totalBetPlayer1 as { toNumber(): number }).toNumber(),
-            totalBetPlayer2: (rawPool.totalBetPlayer2 as { toNumber(): number }).toNumber(),
-            betCount: rawPool.betCount as number,
-            isClosed: rawPool.isClosed as boolean,
-            winner: rawPool.winner as PublicKey | null,
-            distributed: rawPool.distributed as boolean,
-          });
-        } catch { /* デコードエラーは無視 */ }
+          const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(accountInfo.data)) as Record<string, unknown>;
+          setPool(decodeRawPool(rawPool));
+        } catch (err) { console.error('[useBettingPool] BettingPool decode error:', err); }
       },
       'confirmed'
     );

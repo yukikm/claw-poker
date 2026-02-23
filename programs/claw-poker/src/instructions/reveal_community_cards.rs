@@ -1,24 +1,10 @@
 use anchor_lang::prelude::*;
 use crate::state::{Game, GamePhase, PlayerState};
-use crate::utils::shuffle_deck;
 use crate::errors::PokerError;
 
 /// 既出カードリストと新しいカードの重複を検証するヘルパー
 fn require_no_duplicate(new_card: u8, revealed: &[u8]) -> Result<()> {
     require!(!revealed.contains(&new_card), PokerError::InvalidAction);
-    Ok(())
-}
-
-/// VRFシードからデッキを再計算し、operatorが渡したカードが正しいか検証する
-fn verify_board_cards(game: &Game, board_cards: &[u8], indices: &[usize]) -> Result<()> {
-    // deck_commitmentが設定されていない場合はスキップ（互換性）
-    if game.deck_commitment == [0u8; 32] {
-        return Ok(());
-    }
-    let deck = shuffle_deck(&game.deck_commitment, game.hand_number);
-    for (i, &idx) in indices.iter().enumerate() {
-        require!(board_cards[i] == deck[idx], PokerError::InvalidAction);
-    }
     Ok(())
 }
 
@@ -35,13 +21,41 @@ pub fn handler(
         require!(*card < 52, PokerError::InvalidAction);
     }
 
+    // ホールカードとコミュニティカードの重複チェック
+    // Private ERでオペレーターはホールカードを知っているため、誤送信防止として検証する
+    let p1_hole = ctx.accounts.player1_state.hole_cards;
+    let p2_hole = ctx.accounts.player2_state.hole_cards;
+
+    // 既公開コミュニティカードも含めて使用済みカードセットを構築
+    let mut used_cards: Vec<u8> = Vec::new();
+    if p1_hole[0] != 255 {
+        used_cards.push(p1_hole[0]);
+    }
+    if p1_hole[1] != 255 {
+        used_cards.push(p1_hole[1]);
+    }
+    if p2_hole[0] != 255 {
+        used_cards.push(p2_hole[0]);
+    }
+    if p2_hole[1] != 255 {
+        used_cards.push(p2_hole[1]);
+    }
+    // Flop以降は既公開のコミュニティカードも使用済みリストに追加
+    for existing in game.board_cards.iter() {
+        if *existing != 255 {
+            used_cards.push(*existing);
+        }
+    }
+
+    for card in board_cards.iter() {
+        require!(!used_cards.contains(card), PokerError::InvalidAction);
+        used_cards.push(*card);
+    }
+
     match phase {
         GamePhase::Flop => {
             require!(game.phase == GamePhase::PreFlop, PokerError::InvalidAction);
             require!(board_cards.len() == 3, PokerError::InvalidAction);
-
-            // VRFシードからデッキを再計算してFlop 3枚を検証（deck[4], deck[5], deck[6]）
-            verify_board_cards(game, &board_cards, &[4, 5, 6])?;
 
             // Flopの3枚はバッチ内で互いに重複してはならない
             require!(board_cards[0] != board_cards[1], PokerError::InvalidAction);
@@ -57,9 +71,6 @@ pub fn handler(
             require!(game.phase == GamePhase::Flop, PokerError::InvalidAction);
             require!(board_cards.len() == 1, PokerError::InvalidAction);
 
-            // VRFシードからデッキを再計算してTurnカードを検証（deck[7]）
-            verify_board_cards(game, &board_cards, &[7])?;
-
             // Turnカードは公開済みFlopの3枚と重複してはならない
             let flop = &game.board_cards[0..3];
             require_no_duplicate(board_cards[0], flop)?;
@@ -70,9 +81,6 @@ pub fn handler(
         GamePhase::River => {
             require!(game.phase == GamePhase::Turn, PokerError::InvalidAction);
             require!(board_cards.len() == 1, PokerError::InvalidAction);
-
-            // VRFシードからデッキを再計算してRiverカードを検証（deck[8]）
-            verify_board_cards(game, &board_cards, &[8])?;
 
             // Riverカードは公開済みFlop + Turnと重複してはならない
             let flop_and_turn = &game.board_cards[0..4];

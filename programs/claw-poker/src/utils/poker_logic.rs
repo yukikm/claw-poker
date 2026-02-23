@@ -53,6 +53,10 @@ pub const CHECKPOINT_INTERVAL: u64 = 50;
 /// 最大ハンド数
 pub const MAX_HAND_NUMBER: u64 = 200;
 
+/// MAX_HAND_NUMBER到達後にタイが続く場合の延長ハンド上限
+/// この上限を超えてもチップが同数の場合はPlayer1を勝者とする（実際上は発生しない）
+pub const MAX_TIE_EXTENSION_HANDS: u64 = 20;
+
 /// 初期チップスタック
 pub const INITIAL_CHIP_STACK: u64 = 1000;
 

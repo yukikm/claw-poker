@@ -30,15 +30,95 @@
         },
         {
           "name": "game",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
         },
         {
           "name": "player1_state",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
         },
         {
           "name": "player2_state",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -153,10 +233,6 @@
           "relations": [
             "bet_record"
           ]
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -368,11 +444,13 @@
           "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
         },
         {
-          "name": "magic_context",
-          "writable": true
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
         },
         {
-          "name": "magic_program"
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
         }
       ],
       "args": [
@@ -725,7 +803,11 @@
           }
         },
         {
-          "name": "owner_program"
+          "name": "owner_program",
+          "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo"
+        },
+        {
+          "name": "validator"
         },
         {
           "name": "buffer",
@@ -1075,7 +1157,11 @@
           }
         },
         {
-          "name": "owner_program"
+          "name": "owner_program",
+          "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo"
+        },
+        {
+          "name": "validator"
         },
         {
           "name": "buffer",
@@ -1161,7 +1247,11 @@
           }
         },
         {
-          "name": "owner_program"
+          "name": "owner_program",
+          "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo"
+        },
+        {
+          "name": "validator"
         },
         {
           "name": "buffer",
@@ -1840,10 +1930,20 @@
         },
         {
           "name": "player",
-          "signer": true,
+          "docs": [
+            "The TEE operator signs transactions on behalf of players in the Private Ephemeral Rollup."
+          ],
           "relations": [
             "player_state"
           ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "TEE operator signs on behalf of the player (MagicBlock PER pattern).",
+            "Authorized by game.operator constraint above."
+          ],
+          "signer": true
         }
       ],
       "args": [
@@ -1863,6 +1963,43 @@
           "name": "amount",
           "type": {
             "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
           }
         }
       ]
@@ -2118,6 +2255,10 @@
               }
             ]
           }
+        },
+        {
+          "name": "operator",
+          "signer": true
         }
       ],
       "args": [
@@ -2157,6 +2298,74 @@
               {
                 "kind": "arg",
                 "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
               }
             ]
           }

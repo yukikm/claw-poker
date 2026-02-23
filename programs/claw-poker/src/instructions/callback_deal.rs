@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use ephemeral_vrf_sdk::consts::VRF_PROGRAM_IDENTITY;
+use sha2::{Sha256, Digest};
 use crate::state::{Game, GamePhase, PlayerState};
 use crate::utils::{shuffle_deck, calculate_blinds};
 use crate::errors::PokerError;
@@ -7,11 +8,14 @@ use crate::errors::PokerError;
 pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
     let game = &mut ctx.accounts.game;
 
-    // VRFランダムネスをdeck_commitmentとして保存（後のcommunity card検証に使用）
-    game.deck_commitment = randomness;
-
-    // Fisher-Yatesシャッフルでデッキをシャッフル
+    // Fisher-Yatesシャッフルでデッキをシャッフル（元のrandomnessを使用）
     let deck = shuffle_deck(&randomness, game.hand_number);
+
+    // deck_commitmentにはハッシュのみ保存（外部から見てもデッキを再構築できない）
+    let mut hasher = Sha256::new();
+    hasher.update(&randomness);
+    let commitment: [u8; 32] = hasher.finalize().into();
+    game.deck_commitment = commitment;
 
     // ホールカード配布
     ctx.accounts.player1_state.hole_cards = [deck[0], deck[1]];
@@ -107,6 +111,9 @@ pub struct CallbackDeal<'info> {
     pub vrf_program_identity: Signer<'info>,
     #[account(
         mut,
+        // アカウント自身のgame_idでPDA検証（VRFコールバックにgame_idパラメータがないため自己参照）
+        seeds = [b"game", game.game_id.to_le_bytes().as_ref()],
+        bump = game.bump,
         constraint = game.phase == GamePhase::Shuffling @ PokerError::InvalidAction,
     )]
     pub game: Account<'info, Game>,

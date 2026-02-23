@@ -7,7 +7,7 @@ import { type BettingPoolState } from '@/lib/types';
 import { usePlaceBet } from '@/hooks/usePlaceBet';
 import { OddsDisplay } from './OddsDisplay';
 import { formatSol, formatOdds } from '@/lib/format';
-import { LAMPORTS_PER_SOL, MIN_BET_LAMPORTS } from '@/lib/constants';
+import { LAMPORTS_PER_SOL, MIN_BET_LAMPORTS, MAX_BET_LAMPORTS } from '@/lib/constants';
 
 interface BettingPanelProps {
   gameId: bigint;
@@ -25,9 +25,10 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
   const [playerChoice, setPlayerChoice] = useState<1 | 2>(1);
   const [betSol, setBetSol] = useState('0.1');
   const [txSig, setTxSig] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const isBettable = pool && !pool.isClosed && (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn');
-  const betLamports = Math.round(parseFloat(betSol || '0') * LAMPORTS_PER_SOL);
+  const betLamports = Math.floor(parseFloat(betSol || '0') * LAMPORTS_PER_SOL);
 
   const { odds1, odds2 } = formatOdds(pool?.totalBetPlayer1 ?? 0, pool?.totalBetPlayer2 ?? 0);
   const selectedOdds = playerChoice === 1 ? odds1 : odds2;
@@ -37,7 +38,22 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
     : null;
 
   const handleBet = async () => {
-    if (!publicKey || !isBettable || betLamports < MIN_BET_LAMPORTS) return;
+    setValidationError(null);
+
+    if (!publicKey || !isBettable) return;
+
+    if (isNaN(betLamports) || betLamports <= 0) {
+      setValidationError('有効なベット額を入力してください');
+      return;
+    }
+    if (betLamports < MIN_BET_LAMPORTS) {
+      setValidationError(`最小ベット額は ${MIN_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL です`);
+      return;
+    }
+    if (betLamports > MAX_BET_LAMPORTS) {
+      setValidationError(`最大ベット額は ${MAX_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL です`);
+      return;
+    }
 
     const sig = await placeBet({
       gameId,
@@ -126,6 +142,10 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
             </span>
           </div>
 
+          {validationError && (
+            <p className="text-xs text-red-400" role="alert">{validationError}</p>
+          )}
+
           {error && (
             <p className="text-xs text-red-400" role="alert">{error}</p>
           )}
@@ -136,7 +156,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
 
           <button
             onClick={handleBet}
-            disabled={isLoading || betLamports < MIN_BET_LAMPORTS}
+            disabled={isLoading || isNaN(betLamports) || betLamports < MIN_BET_LAMPORTS || betLamports > MAX_BET_LAMPORTS}
             className="w-full glass-cyan rounded-lg py-3 text-sm font-semibold text-cyan-300 hover:text-white hover:shadow-neon-cyan transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label={`Player ${playerChoice}に${betSol} SOLをベット`}
           >

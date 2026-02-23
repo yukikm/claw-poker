@@ -22,7 +22,7 @@ export interface GameState {
   phase: GamePhase;
   handNumber: number;
   pot: number;
-  currentTurn: number; // 1 or 2
+  currentTurn: 0 | 1 | 2; // 1=Player1, 2=Player2, 0=no active turn (between streets / deal pending)
   boardCards: CardDisplay[];
   player1: AgentState;
   player2: AgentState;

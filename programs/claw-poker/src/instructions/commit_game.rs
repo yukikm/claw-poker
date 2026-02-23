@@ -9,15 +9,22 @@ use crate::errors::PokerError;
 pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
     let game = &ctx.accounts.game;
 
-    let account_infos = vec![
-        ctx.accounts.game.as_ref(),
-        ctx.accounts.player1_state.as_ref(),
-        ctx.accounts.player2_state.as_ref(),
-    ];
-
     if game.phase == GamePhase::Finished {
         // ゲーム終了: 最終状態をL1にコミットしてER委譲を解除
         require!(game.winner.is_some(), PokerError::GameNotFound);
+
+        // ホールカードをクリア（プライバシー保護: L1への露出防止）
+        // account_infos を作成する前にミュータブル借用を終了させる
+        ctx.accounts.player1_state.hole_cards = [255u8; 2];
+        ctx.accounts.player2_state.hole_cards = [255u8; 2];
+
+        // ホールカードクリア後にイミュータブル借用を取得
+        let account_infos = vec![
+            ctx.accounts.game.as_ref(),
+            ctx.accounts.player1_state.as_ref(),
+            ctx.accounts.player2_state.as_ref(),
+        ];
+
         commit_and_undelegate_accounts(
             &ctx.accounts.payer,
             account_infos,
@@ -86,6 +93,11 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
             game.phase == GamePhase::Waiting,
             PokerError::InvalidAction
         );
+        let account_infos = vec![
+            ctx.accounts.game.as_ref(),
+            ctx.accounts.player1_state.as_ref(),
+            ctx.accounts.player2_state.as_ref(),
+        ];
         commit_accounts(
             &ctx.accounts.payer,
             account_infos,
