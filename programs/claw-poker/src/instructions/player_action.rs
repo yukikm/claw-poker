@@ -121,8 +121,16 @@ pub fn handler(
                         game.current_turn = Pubkey::default();
                     }
                     _ => {
-                        // Preflop: BB Optionがあるのでターンを相手に渡す
-                        game.current_turn = opponent_key;
+                        // PreFlop:
+                        // was_action_taken=falseはSBの最初のCall（BBに合わせる）→ BBにオプション
+                        // was_action_taken=trueはBBがRaise済み → SBのCallでラウンド終了
+                        if was_action_taken {
+                            // BBが既にRaise等のアクションをした後のCall → ラウンド終了シグナル
+                            game.current_turn = Pubkey::default();
+                        } else {
+                            // SBの最初のCall（ブラインドを揃えた）→ BBにオプションを与える
+                            game.current_turn = opponent_key;
+                        }
                     }
                 }
             } else {
@@ -209,6 +217,15 @@ pub fn handler(
                 game.player2_is_all_in = true;
             }
             game.pot = game.pot.checked_add(all_in_amount).ok_or(PokerError::PotOverflow)?;
+
+            // AllInが実質的なRaiseの場合、last_raise_amountを更新する
+            // （betting_closedになるため相手はCallまたはFoldのみだが、記録は正確に保つ）
+            let new_all_in_committed = player_state.chips_committed;
+            if new_all_in_committed > opp_committed {
+                let raise_increment = new_all_in_committed.saturating_sub(opp_committed);
+                game.last_raise_amount = raise_increment;
+            }
+
             game.betting_closed = true;
 
             update_game_committed(game, is_player1, player_state.chips_committed);

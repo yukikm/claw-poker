@@ -8,6 +8,8 @@ import {
 } from '@solana/web3.js';
 import { AnchorProvider, Program, BN, Idl, Wallet } from '@coral-xyz/anchor';
 import * as path from 'path';
+import nacl from 'tweetnacl';
+import { encode as encodeBase58 } from 'bs58';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const IDL = require(path.join(__dirname, '../../app/lib/claw_poker_idl.json')) as Idl;
@@ -43,12 +45,22 @@ function toAnchorAction(action: ActionType): Record<string, Record<string, never
   return { [map[action]]: {} };
 }
 
+/** TEE認証トークンのキャッシュ（トークン再取得までのバッファ: 5分） */
+interface TeeAuthCache {
+  token: string;
+  expiresAt: number;
+  connection: Connection;
+}
+
 export class AnchorClient {
   private l1Connection: Connection;
   private erConnection: Connection;
   private operatorKeypair: Keypair;
   private l1Program: Program;
   private erProgram: Program;
+  private teeRpcUrl: string | null;
+  private teeWsUrl: string | null;
+  private teeAuthCache: TeeAuthCache | null = null;
 
   constructor(rpcUrl: string, erRpcUrl: string) {
     this.l1Connection = new Connection(rpcUrl, 'confirmed');
@@ -56,7 +68,10 @@ export class AnchorClient {
 
     const operatorPrivKey = process.env.OPERATOR_PRIVATE_KEY;
     if (!operatorPrivKey) {
-      console.warn('[AnchorClient] OPERATOR_PRIVATE_KEY not set, using ephemeral keypair (dev only)');
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('OPERATOR_PRIVATE_KEY is required in production');
+      }
+      console.warn('⚠️  OPERATOR_PRIVATE_KEY not set, using ephemeral keypair (dev only)');
       this.operatorKeypair = Keypair.generate();
     } else {
       // OPERATOR_PRIVATE_KEY はsolana-keygenと同じJSON配列形式: [1,2,...,64]
@@ -77,6 +92,8 @@ export class AnchorClient {
       signTransaction: async <T extends Transaction | VersionedTransaction>(tx: T): Promise<T> => {
         if (tx instanceof Transaction) {
           tx.partialSign(kp);
+        } else {
+          (tx as VersionedTransaction).sign([kp]);
         }
         return tx;
       },
@@ -84,6 +101,8 @@ export class AnchorClient {
         txs.forEach((tx) => {
           if (tx instanceof Transaction) {
             tx.partialSign(kp);
+          } else {
+            (tx as VersionedTransaction).sign([kp]);
           }
         });
         return txs;
@@ -99,6 +118,18 @@ export class AnchorClient {
 
     this.l1Program = new Program(IDL, l1Provider);
     this.erProgram = new Program(IDL, erProvider);
+
+    // TEE RPC URL（Private Ephemeral Rollup用。未設定時はホールカード読み取りがERフォールバック）
+    this.teeRpcUrl = process.env.MAGICBLOCK_TEE_RPC_URL ?? null;
+    this.teeWsUrl = process.env.MAGICBLOCK_TEE_WS_URL ?? null;
+    if (this.teeRpcUrl) {
+      console.log('[AnchorClient] TEE RPC configured for private PlayerState access');
+    } else {
+      console.warn(
+        '[AnchorClient] MAGICBLOCK_TEE_RPC_URL not set. ' +
+        'Hole card reads will use ER connection (privacy not enforced).',
+      );
+    }
   }
 
   getL1Connection(): Connection {
@@ -232,7 +263,6 @@ export class AnchorClient {
     const [player1StatePda] = this.derivePlayerStatePda(gameId, player1);
     const [player2StatePda] = this.derivePlayerStatePda(gameId, player2);
     const [vaultPda] = this.deriveVaultPda(gameId);
-    const [queuePda] = this.deriveMatchmakingQueuePda();
     const operatorPubkey = this.operatorKeypair.publicKey;
 
     // Step 1: initialize_game
@@ -273,7 +303,7 @@ export class AnchorClient {
       .accounts({
         game: gamePda,
         gameVault: vaultPda,
-        matchmakingQueue: queuePda,
+        operator: operatorPubkey,
         payer: operatorPubkey,
         systemProgram: SystemProgram.programId,
       })
@@ -346,11 +376,164 @@ export class AnchorClient {
     return txSig;
   }
 
+  /**
+   * x402支払い後にキュー登録が失敗した場合、オペレーターウォレットからプレイヤーにSOLを返金する。
+   * オペレーターが直接SOL転送を行う。
+   */
+  async refundEntryFee(playerPubkey: PublicKey, lamports: bigint): Promise<void> {
+    const { blockhash } = await this.l1Connection.getLatestBlockhash();
+    const transaction = new Transaction({
+      recentBlockhash: blockhash,
+      feePayer: this.operatorKeypair.publicKey,
+    });
+    transaction.add(
+      SystemProgram.transfer({
+        fromPubkey: this.operatorKeypair.publicKey,
+        toPubkey: playerPubkey,
+        lamports: Number(lamports),
+      }),
+    );
+    transaction.sign(this.operatorKeypair);
+    const sig = await this.l1Connection.sendRawTransaction(transaction.serialize(), {
+      skipPreflight: false,
+    });
+    await this.l1Connection.confirmTransaction(sig, 'confirmed');
+    console.log(`[AnchorClient] Refunded ${lamports} lamports to ${playerPubkey.toBase58()}: ${sig}`);
+  }
+
+  /**
+   * 30秒アクションタイムアウト時にhandle_timeout命令を呼び出す。
+   * ER上で実行し、タイムアウトしたプレイヤーのPlayerStateを更新する。
+   */
+  async handleTimeout(gameId: bigint, timedOutPlayerWallet: PublicKey): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [playerStatePda] = this.derivePlayerStatePda(gameId, timedOutPlayerWallet);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    const txSig = await (this.erProgram.methods as unknown as {
+      handleTimeout: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .handleTimeout(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        timedOutPlayerState: playerStatePda,
+        operator: operatorPubkey,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Timeout handled for game ${gameId}, player ${timedOutPlayerWallet.toBase58()}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * x402支払い検証後にオペレーターが呼び出すキュー登録命令。
+   * SOL転送はx402プロトコルが担当し、このメソッドはキュー登録のみ行う。
+   */
+  async enterMatchmakingQueue(playerPubkey: PublicKey, entryFeeLamports: bigint): Promise<void> {
+    const [queuePda] = this.deriveMatchmakingQueuePda();
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    await (this.l1Program.methods as unknown as {
+      enterMatchmakingQueue: (entryFee: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .enterMatchmakingQueue(new BN(entryFeeLamports.toString()))
+      .accounts({
+        matchmakingQueue: queuePda,
+        player: playerPubkey,
+        operator: operatorPubkey,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Player ${playerPubkey.toBase58()} entered queue, fee: ${entryFeeLamports} lamports`);
+  }
+
+  // ─── TEE認証 ────────────────────────────────────────────────────────────
+
+  /** TEE認証トークンの有効期限バッファ（5分前に再取得） */
+  private static readonly TEE_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+  /**
+   * TEE認証済みConnectionを取得する。
+   * operatorKeypairでチャレンジに署名してTEE RPCの認証トークンを取得し、
+   * トークン付きURLでConnectionを作成する。トークンはキャッシュされ、
+   * 有効期限の5分前に自動的に再取得される。
+   *
+   * TEE RPC URLが未設定の場合はnullを返す。
+   */
+  private async getTeeConnection(): Promise<Connection | null> {
+    if (!this.teeRpcUrl) return null;
+
+    // キャッシュが有効ならそのまま返す
+    if (
+      this.teeAuthCache &&
+      this.teeAuthCache.expiresAt > Date.now() + AnchorClient.TEE_TOKEN_REFRESH_BUFFER_MS
+    ) {
+      return this.teeAuthCache.connection;
+    }
+
+    // TEE RPCにチャレンジを要求
+    const challengeRes = await fetch(
+      `${this.teeRpcUrl}/auth/challenge?pubkey=${this.operatorKeypair.publicKey.toString()}`,
+    );
+    const challengeJson = await challengeRes.json() as { challenge?: string; error?: string };
+    if (challengeJson.error) {
+      throw new Error(`TEE challenge failed: ${challengeJson.error}`);
+    }
+    if (!challengeJson.challenge) {
+      throw new Error('TEE challenge: no challenge received');
+    }
+
+    // operatorKeypairでチャレンジに署名（ed25519 detached signature）
+    const challengeBytes = new Uint8Array(Buffer.from(challengeJson.challenge, 'utf-8'));
+    const signature = nacl.sign.detached(challengeBytes, this.operatorKeypair.secretKey);
+    const signatureBase58 = encodeBase58(signature);
+
+    // 認証トークンを取得
+    const authRes = await fetch(`${this.teeRpcUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pubkey: this.operatorKeypair.publicKey.toString(),
+        challenge: challengeJson.challenge,
+        signature: signatureBase58,
+      }),
+    });
+    const authJson = await authRes.json() as { token?: string; expiresAt?: number; error?: string };
+    if (authRes.status !== 200 || !authJson.token) {
+      throw new Error(`TEE auth failed: ${authJson.error ?? 'no token received'}`);
+    }
+
+    // 30日デフォルト有効期限（MagicBlock SDK SESSION_DURATION準拠）
+    const expiresAt = authJson.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+    const teeConnection = new Connection(
+      `${this.teeRpcUrl}?token=${authJson.token}`,
+      {
+        commitment: 'processed',
+        wsEndpoint: this.teeWsUrl ? `${this.teeWsUrl}?token=${authJson.token}` : undefined,
+      },
+    );
+
+    this.teeAuthCache = { token: authJson.token, expiresAt, connection: teeConnection };
+    console.log('[AnchorClient] TEE auth token acquired, expires:', new Date(expiresAt).toISOString());
+    return teeConnection;
+  }
+
   // ─── PlayerState読み取り ───────────────────────────────────────────────────
 
   /**
    * PlayerStateアカウントからホールカードを読み取る。
-   * ERコネクションから読み取り（ゲーム中はER上に存在）。
+   *
+   * MagicBlock Private Ephemeral Rollupでは、PlayerStateがPERにデリゲートされると
+   * ホールカードデータはTEE内で暗号化され、通常のER RPCでは読み取れない。
+   * TEE認証済みコネクション（operatorKeypairで認証）経由でのみアクセス可能。
+   *
+   * MAGICBLOCK_TEE_RPC_URL が設定されている場合はTEEコネクションを使用し、
+   * 未設定の場合はERコネクションにフォールバックする（開発環境向け）。
    */
   async getPlayerHoleCards(
     gameId: bigint,
@@ -358,7 +541,18 @@ export class AnchorClient {
   ): Promise<[string, string] | null> {
     try {
       const [playerStatePda] = this.derivePlayerStatePda(gameId, playerWallet);
-      const accountInfo = await this.erConnection.getAccountInfo(playerStatePda, 'confirmed');
+
+      // TEE認証済みコネクションを優先使用。未設定時はERフォールバック。
+      let connection: Connection;
+      try {
+        const teeConn = await this.getTeeConnection();
+        connection = teeConn ?? this.erConnection;
+      } catch (teeErr) {
+        console.warn('[AnchorClient] TEE auth failed, falling back to ER connection:', teeErr);
+        connection = this.erConnection;
+      }
+
+      const accountInfo = await connection.getAccountInfo(playerStatePda, 'confirmed');
       if (!accountInfo) return null;
 
       const decoded = this.erProgram.coder.accounts.decode('PlayerState', accountInfo.data) as {
@@ -425,49 +619,55 @@ export class AnchorClient {
 
   async getActiveGames(): Promise<ActiveGame[]> {
     try {
-      // Anchor IDLを使ってGame accountsをデコード
+      // Game accountのdiscriminatorでフィルタリング（base58エンコード済み）
+      const GAME_DISCRIMINATOR_BASE58 = '5aNQXizG8jB';
       const accounts = await this.erConnection.getProgramAccounts(PROGRAM_ID, {
         commitment: 'confirmed',
-        filters: [{ dataSize: 8 + 350 }], // Game accountの概算サイズ
+        filters: [
+          { memcmp: { offset: 0, bytes: GAME_DISCRIMINATOR_BASE58 } },
+        ],
       });
 
+      const phases = ['Waiting', 'Shuffling', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown', 'Finished'];
       const games: ActiveGame[] = [];
+
       for (const account of accounts) {
         try {
-          const data = account.account.data;
-          if (data.length < 8 + 8) continue;
+          const decoded = this.erProgram.coder.accounts.decode('Game', account.account.data) as {
+            gameId: { toNumber?: () => number; toString: () => string };
+            player1: PublicKey;
+            player2: PublicKey;
+            phase: Record<string, unknown>;
+            pot: { toNumber?: () => number };
+            handNumber: { toNumber?: () => number };
+          };
 
-          // GameMonitorと同じバイナリデコードを使用（IDLデコードの代替）
-          let offset = 8; // skip discriminator
-          const gameId = data.readBigUInt64LE(offset);
-          offset += 8;
-          offset += 32; // operator
-          offset += 32; // platform_treasury
-          const player1 = new PublicKey(data.subarray(offset, offset + 32)).toBase58();
-          offset += 32;
-          const player2 = new PublicKey(data.subarray(offset, offset + 32)).toBase58();
-          offset += 32;
-          offset += 8; // buy_in
-          const pot = Number(data.readBigUInt64LE(offset));
-          offset += 8;
-          offset += 32; // current_turn
-          const phaseIndex = data.readUInt8(offset);
-          offset += 1;
-
-          const phases = ['Waiting', 'Shuffling', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown', 'Finished'];
-          const phase = phases[phaseIndex] ?? 'Unknown';
+          // Anchorのenum decode結果は { variantName: {} } 形式
+          const phaseKey = Object.keys(decoded.phase)[0] ?? 'unknown';
+          // camelCase→PascalCase変換（例: preFlop → PreFlop）
+          const phase = phaseKey.charAt(0).toUpperCase() + phaseKey.slice(1);
 
           if (phase === 'Finished' || phase === 'Waiting') continue;
 
-          offset += 5 + 32 + 8 + 8; // board_cards + deck_commitment + p1_committed + p2_committed
-          const handNumber = Number(data.readBigUInt64LE(offset));
+          // phases配列に含まれるかで正当性チェック
+          const normalizedPhase = phases.includes(phase) ? phase : 'Unknown';
+
+          const gameId = typeof decoded.gameId.toNumber === 'function'
+            ? BigInt(decoded.gameId.toNumber())
+            : BigInt(decoded.gameId.toString());
+          const pot = typeof decoded.pot.toNumber === 'function'
+            ? decoded.pot.toNumber()
+            : Number(decoded.pot.toString());
+          const handNumber = typeof decoded.handNumber.toNumber === 'function'
+            ? decoded.handNumber.toNumber()
+            : Number(decoded.handNumber.toString());
 
           games.push({
             gameId,
             gamePda: account.pubkey.toBase58(),
-            player1,
-            player2,
-            phase,
+            player1: decoded.player1.toBase58(),
+            player2: decoded.player2.toBase58(),
+            phase: normalizedPhase,
             pot,
             handNumber,
           });
@@ -488,7 +688,7 @@ export class AnchorClient {
 function decodeCardToString(cardValue: number): string {
   if (cardValue >= 52) return '??';
   const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
-  const suits = ['C', 'D', 'H', 'S'];
+  const suits = ['S', 'H', 'D', 'C'];
   const rank = ranks[cardValue % 13];
   const suit = suits[Math.floor(cardValue / 13)];
   return `${rank}${suit}`;

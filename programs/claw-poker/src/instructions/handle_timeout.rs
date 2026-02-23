@@ -51,9 +51,20 @@ pub fn handler(ctx: Context<HandleTimeout>, _game_id: u64) -> Result<()> {
             // PreFlopでcommitted額が等しい = BBのオプション行使Check → Flop遷移シグナル
             game.current_turn = Pubkey::default();
         } else {
-            // PostFlop: ターンを相手に移す
+            // PostFlop: 自動Check処理
             let opponent = if is_player1_turn { game.player2 } else { game.player1 };
-            game.current_turn = opponent;
+            if game.street_action_taken {
+                // 相手が既にCheckしていた → ラウンド終了シグナル
+                game.current_turn = Pubkey::default();
+                // Riverの2回目Checkはショーダウンへ遷移
+                if game.phase == GamePhase::River {
+                    game.phase = GamePhase::Showdown;
+                }
+            } else {
+                // 1人目のCheck → ターンを相手に渡す
+                game.street_action_taken = true;
+                game.current_turn = opponent;
+            }
         }
     }
 

@@ -1,41 +1,39 @@
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  Transaction,
-  TransactionInstruction,
-  SystemProgram,
-} from '@solana/web3.js';
+import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { getConnectionState } from '../connectionState';
 
-const PROGRAM_ID = new PublicKey('6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo');
+// x402-fetchのインポート（インストール済みの場合）
+type FetchWithPayment = (url: string, options?: RequestInit) => Promise<Response>;
 
-// sha256("global:enter_matchmaking_queue")[0..8]
-const ENTER_QUEUE_DISCRIMINATOR = Buffer.from([222, 121, 183, 27, 168, 28, 129, 37]);
+async function createX402Fetch(keypair: Keypair, rpcUrl: string): Promise<FetchWithPayment> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { wrapFetchWithPayment } = require('x402-fetch') as {
+      wrapFetchWithPayment: (
+        fetchFn: typeof fetch,
+        wallet: unknown,
+        opts?: { maxValue?: number },
+      ) => FetchWithPayment;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createSolanaKeypairWallet } = require('x402-fetch/solana') as {
+      createSolanaKeypairWallet: (keypair: Keypair, rpcUrl: string) => unknown;
+    };
 
-/** MatchmakingQueue PDA: seeds = [b"matchmaking_queue"] */
-function deriveMatchmakingQueuePda(): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('matchmaking_queue')],
-    PROGRAM_ID,
-  );
-  return pda;
-}
-
-/** enter_matchmaking_queue 命令データを構築する (discriminator + entry_fee u64 LE) */
-function buildEnterQueueInstructionData(entryFeeLamports: bigint): Buffer {
-  const data = Buffer.allocUnsafe(8 + 8);
-  ENTER_QUEUE_DISCRIMINATOR.copy(data, 0);
-  data.writeBigUInt64LE(entryFeeLamports, 8);
-  return data;
+    const wallet = createSolanaKeypairWallet(keypair, rpcUrl);
+    return wrapFetchWithPayment(fetch, wallet, { maxValue: 1.0 });
+  } catch {
+    // x402-fetchが未インストールの場合はネイティブfetchにフォールバック
+    console.warn('⚠️  x402-fetch not installed. Falling back to plain fetch (payment will be rejected by server).');
+    return (url: string, options?: RequestInit) => fetch(url, options);
+  }
 }
 
 export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => void }): void {
   api.registerTool({
     name: 'poker_join_queue',
     description:
-      'マッチメイキングキューに参加する。参加費（SOL）をオンチェーンで支払い、ゲームサーバーにキュー参加を通知する。poker_connectで接続済みであること。',
+      'マッチメイキングキューに参加する。x402プロトコルで参加費（SOL）を自動支払いしてHTTP経由でキューに登録する。poker_connectで接続済みであること。',
     parameters: {
       type: 'object',
       properties: {
@@ -73,76 +71,53 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
       }
 
       const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
-      const connection = new Connection(rpcUrl, 'confirmed');
+      const serverHttpUrl = process.env.CLAW_POKER_SERVER_HTTP_URL ?? 'http://localhost:3001';
 
-      const entryFeeSol = Math.max(0.001, Math.min(1.0, params.entry_fee_sol ?? 0.1));
-      const entryFeeLamports = BigInt(Math.floor(entryFeeSol * 1_000_000_000));
-
-      // ウォレット残高チェック（参加費 + トランザクション手数料）
-      let balance: number;
+      // x402-fetchでHTTPリクエストを送信（402レスポンス時に自動でSolana支払いTXを作成・送信）
+      let response: Response;
       try {
-        balance = await connection.getBalance(keypair.publicKey, 'confirmed');
-      } catch {
-        return { success: false, message: 'RPC_ERROR: ウォレット残高の取得に失敗しました' };
-      }
+        const fetchWithPayment = await createX402Fetch(keypair, rpcUrl);
 
-      const requiredLamports = Number(entryFeeLamports) + 10_000; // +0.00001 SOL for fees
-      if (balance < requiredLamports) {
-        return {
-          success: false,
-          message: `INSUFFICIENT_BALANCE: 残高不足。必要: ${entryFeeSol} SOL + 手数料、現在: ${balance / 1e9} SOL`,
-        };
-      }
-
-      // オンチェーンで enter_matchmaking_queue を呼び出す
-      let txSignature: string;
-      try {
-        const matchmakingQueuePda = deriveMatchmakingQueuePda();
-        const instructionData = buildEnterQueueInstructionData(entryFeeLamports);
-
-        const ix = new TransactionInstruction({
-          programId: PROGRAM_ID,
-          keys: [
-            { pubkey: matchmakingQueuePda, isSigner: false, isWritable: true },
-            { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
-            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-          ],
-          data: instructionData,
+        // POST /api/v1/queue/join → 402 → 自動支払い → リトライ → 200 OK
+        response = await fetchWithPayment(`${serverHttpUrl}/api/v1/queue/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletAddress: keypair.publicKey.toBase58(),
+          }),
         });
-
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-        const tx = new Transaction({
-          recentBlockhash: blockhash,
-          feePayer: keypair.publicKey,
-        }).add(ix);
-        tx.sign(keypair);
-
-        txSignature = await connection.sendRawTransaction(tx.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-        });
-
-        // トランザクション確認を待つ
-        await connection.confirmTransaction(
-          { signature: txSignature, blockhash, lastValidBlockHeight },
-          'confirmed',
-        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
           success: false,
-          message: `ONCHAIN_ERROR: enter_matchmaking_queueの呼び出しに失敗しました: ${msg}`,
+          message: `HTTP_ERROR: キュー参加リクエストに失敗しました: ${msg}`,
         };
       }
 
-      // WebSocket経由でサーバーにキュー参加を通知
+      if (!response.ok) {
+        let errorDetails = '';
+        try {
+          const body = await response.json() as { error?: string };
+          errorDetails = body.error ?? '';
+        } catch {
+          /* ignore */
+        }
+        return {
+          success: false,
+          message: `QUEUE_JOIN_FAILED: サーバーがエラーを返しました (${response.status}): ${errorDetails}`,
+        };
+      }
+
+      // キュー登録成功 → WebSocketでgame_joinedイベントを待機
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           resolve({
-            success: false,
-            message: 'TIMEOUT: キュー参加のレスポンスがタイムアウトしました',
+            success: true,
+            status: 'queued',
+            entryFeeSol: 0.1,
+            message: `マッチメイキングキューに参加しました。参加費 0.1 SOL を支払いました。対戦相手のマッチングをお待ちください。`,
           });
-        }, 30_000);
+        }, 5_000);
 
         const messageHandler = (data: Buffer | string): void => {
           try {
@@ -153,9 +128,8 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
               resolve({
                 success: true,
                 status: 'queued',
-                txSignature,
-                entryFeeSol,
-                message: `マッチメイキングキューに参加しました（位置: ${message.position}）。参加費 ${entryFeeSol} SOL を支払いました（tx: ${txSignature}）。`,
+                entryFeeSol: 0.1,
+                message: `マッチメイキングキューに参加しました（位置: ${message.position}）。参加費 0.1 SOL を支払いました。`,
               });
             } else if (message.type === 'error') {
               clearTimeout(timeout);
@@ -168,16 +142,6 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
         };
 
         state.ws?.on('message', messageHandler);
-
-        // WebSocketでキュー参加を通知（トランザクション署名を含む）
-        state.ws?.send(
-          JSON.stringify({
-            type: 'join_queue',
-            token: state.token,
-            entryFeeSignature: txSignature,
-            entryFeeAmount: Number(entryFeeLamports),
-          }),
-        );
       });
     },
   });

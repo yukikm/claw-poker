@@ -32,7 +32,17 @@ pub fn handler(ctx: Context<ResolveGame>, _game_id: u64) -> Result<()> {
         **ctx.accounts.platform_treasury.try_borrow_mut_lamports()? += fee;
     }
 
-    // BettingPoolにwinnerを設定し、分配完了フラグを立てる（二重実行防止）
+    // vault に残った余剰lamports（rent-exempt minimum分）をオペレーターに返還
+    let remaining = ctx.accounts.game_vault.get_lamports();
+    if remaining > 0 {
+        **ctx.accounts.game_vault.try_borrow_mut_lamports()? -= remaining;
+        **ctx.accounts.operator.to_account_info().try_borrow_mut_lamports()? += remaining;
+    }
+
+    // BettingPoolにwinnerを設定し、resolve_game二重実行防止フラグを立てる。
+    // distributed=trueはresolve_gameの冪等性保証のためのフラグ。
+    // 観戦者への個別配当はclaim_betting_reward命令で各自が実行し、
+    // BetRecord.claimedフラグで管理される。
     let pool = &mut ctx.accounts.betting_pool;
     pool.winner = Some(winner_key);
     pool.distributed = true;
@@ -78,6 +88,7 @@ pub struct ResolveGame<'info> {
     )]
     pub betting_pool: Account<'info, BettingPool>,
     #[account(
+        mut,
         constraint = operator.key() == game.operator @ PokerError::PermissionDenied
     )]
     pub operator: Signer<'info>,

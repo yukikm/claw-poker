@@ -37,6 +37,24 @@ function gameIdToBuffer(gameId: bigint): Buffer {
   return buf;
 }
 
+/** Anchor BN型の値をnumberに変換する */
+function toBN(val: unknown): number {
+  if (val != null && typeof (val as { toNumber?: unknown }).toNumber === 'function') {
+    return (val as { toNumber(): number }).toNumber();
+  }
+  return typeof val === 'number' ? val : 0;
+}
+
+/** unknown値をbooleanに変換する（undefined/nullはfalse扱い） */
+function toBool(val: unknown): boolean {
+  return typeof val === 'boolean' ? val : Boolean(val);
+}
+
+/** unknown値をPublicKeyとして返す */
+function toPubkey(val: unknown): PublicKey {
+  return val as PublicKey;
+}
+
 function parsePhase(phase: Record<string, unknown>): GamePhase {
   const phaseMap: Record<string, GamePhase> = {
     waiting: 'Waiting',
@@ -59,7 +77,8 @@ function inferAction(
   currFolded: boolean,
   currAllIn: boolean,
   prevPhase: GamePhase | null,
-  currPhase: GamePhase
+  currPhase: GamePhase,
+  prevOppCommitted: number
 ): string | null {
   if (!prevPlayer) return null;
 
@@ -73,9 +92,16 @@ function inferAction(
   }
   const diff = currCommitted - prevPlayer.chipsCommitted;
   if (diff > 0) {
-    // 相手のコミットと同額ならCall、それ以上ならRaise/Bet
-    // ここでは単純にdiff > 0で区別
-    return prevPlayer.chipsCommitted === 0 && diff > 0 ? `Bet(${diff})` : `Raise(${diff})`;
+    // 相手が既にベットしていて、自分がその額に追いついた場合はCall
+    if (prevOppCommitted > prevPlayer.chipsCommitted && currCommitted === prevOppCommitted) {
+      return `Call(${diff})`;
+    }
+    // 相手が既にベットしていて、自分がそれを上回った場合はRaise
+    if (prevOppCommitted > prevPlayer.chipsCommitted && currCommitted > prevOppCommitted) {
+      return `Raise(${diff})`;
+    }
+    // 対称状態（相手と同額）からの増加はBet
+    return `Bet(${diff})`;
   }
   if (diff === 0 && prevPlayer.chipsCommitted === currCommitted) {
     // コミット額が変わらず、ターンが移っていれば Check
@@ -99,35 +125,37 @@ function mapGameAccount(
     programId
   );
 
-  const player1Key = rawGame.player1 as PublicKey;
-  const player2Key = rawGame.player2 as PublicKey;
-  const currentTurnKey = rawGame.currentTurn as PublicKey;
+  const player1Key = toPubkey(rawGame.player1);
+  const player2Key = toPubkey(rawGame.player2);
+  const currentTurnKey = toPubkey(rawGame.currentTurn);
   // Pubkey::default() (SystemProgram = 11111...1111) はターンなし状態を示す
   const DEFAULT_PUBKEY = '11111111111111111111111111111111';
   const currentTurnBase58 = currentTurnKey.toBase58();
 
-  const p1Committed = (rawGame.player1Committed as { toNumber(): number }).toNumber();
-  const p2Committed = (rawGame.player2Committed as { toNumber(): number }).toNumber();
-  const p1Folded = (rawGame.player1HasFolded as boolean) ?? false;
-  const p2Folded = (rawGame.player2HasFolded as boolean) ?? false;
-  const p1AllIn = (rawGame.player1IsAllIn as boolean) ?? false;
-  const p2AllIn = (rawGame.player2IsAllIn as boolean) ?? false;
+  const p1Committed = toBN(rawGame.player1Committed);
+  const p2Committed = toBN(rawGame.player2Committed);
+  const p1Folded = toBool(rawGame.player1HasFolded);
+  const p2Folded = toBool(rawGame.player2HasFolded);
+  const p1AllIn = toBool(rawGame.player1IsAllIn);
+  const p2AllIn = toBool(rawGame.player2IsAllIn);
 
   const prevPhase = prevGame?.phase ?? null;
-  const p1Action = inferAction(prevGame?.player1 ?? null, p1Committed, p1Folded, p1AllIn, prevPhase, phase);
-  const p2Action = inferAction(prevGame?.player2 ?? null, p2Committed, p2Folded, p2AllIn, prevPhase, phase);
+  const prevP2Committed = prevGame?.player2.chipsCommitted ?? 0;
+  const prevP1Committed = prevGame?.player1.chipsCommitted ?? 0;
+  const p1Action = inferAction(prevGame?.player1 ?? null, p1Committed, p1Folded, p1AllIn, prevPhase, phase, prevP2Committed);
+  const p2Action = inferAction(prevGame?.player2 ?? null, p2Committed, p2Folded, p2AllIn, prevPhase, phase, prevP1Committed);
 
   return {
     gameId,
     gamePda,
     phase,
-    handNumber: (rawGame.handNumber as { toNumber(): number }).toNumber(),
-    pot: (rawGame.pot as { toNumber(): number }).toNumber(),
+    handNumber: toBN(rawGame.handNumber),
+    pot: toBN(rawGame.pot),
     currentTurn: currentTurnBase58 === DEFAULT_PUBKEY ? 0 : (currentTurnKey.equals(player1Key) ? 1 : 2),
     boardCards,
     player1: {
       address: player1Key,
-      chips: (rawGame.player1ChipStack as { toNumber(): number }).toNumber(),
+      chips: toBN(rawGame.player1ChipStack),
       chipsCommitted: p1Committed,
       hasFolded: p1Folded,
       isAllIn: p1AllIn,
@@ -135,7 +163,7 @@ function mapGameAccount(
     },
     player2: {
       address: player2Key,
-      chips: (rawGame.player2ChipStack as { toNumber(): number }).toNumber(),
+      chips: toBN(rawGame.player2ChipStack),
       chipsCommitted: p2Committed,
       hasFolded: p2Folded,
       isAllIn: p2AllIn,
@@ -146,7 +174,7 @@ function mapGameAccount(
     winner: rawGame.winner as PublicKey | null,
     bettingPoolPda,
     dealerPosition: rawGame.dealerPosition as number,
-    lastRaiseAmount: (rawGame.lastRaiseAmount as { toNumber(): number }).toNumber(),
+    lastRaiseAmount: toBN(rawGame.lastRaiseAmount),
     showdownCardsP1: (rawGame.showdownCardsP1 as number[]).map(decodeCard),
     showdownCardsP2: (rawGame.showdownCardsP2 as number[]).map(decodeCard),
   };
@@ -155,12 +183,12 @@ function mapGameAccount(
 function mapBettingPoolAccount(rawPool: Record<string, unknown>): BettingPoolState {
   return {
     gameId: BigInt(String(rawPool.gameId)),
-    totalBetPlayer1: (rawPool.totalBetPlayer1 as { toNumber(): number }).toNumber(),
-    totalBetPlayer2: (rawPool.totalBetPlayer2 as { toNumber(): number }).toNumber(),
+    totalBetPlayer1: toBN(rawPool.totalBetPlayer1),
+    totalBetPlayer2: toBN(rawPool.totalBetPlayer2),
     betCount: rawPool.betCount as number,
-    isClosed: rawPool.isClosed as boolean,
+    isClosed: toBool(rawPool.isClosed),
     winner: rawPool.winner as PublicKey | null,
-    distributed: rawPool.distributed as boolean,
+    distributed: toBool(rawPool.distributed),
   };
 }
 

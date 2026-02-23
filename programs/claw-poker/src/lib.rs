@@ -10,6 +10,16 @@ use instructions::*;
 
 declare_id!("6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo");
 
+// #[ephemeral]マクロはMagicBlock Ephemeral Rollups SDKが提供するAnchorマクロ。
+// このマクロはプログラムにER対応のCPI機能（DelegatePermissionCpiBuilder等）を
+// 有効化するために必要。
+//
+// 明示的CPIパターン（create_permission_game, delegate_game等のinstruction）と
+// 併用するのが正しい設計:
+// - #[ephemeral]: SDKのCPI機能とERプログラム識別を有効化
+// - 明示的instructions: アプリケーション固有のdelegate/undelegateロジックを実装
+//
+// 参照: https://docs.magicblock.gg/Ephemeral-Rollups/guides/anchor-integration
 #[ephemeral]
 #[program]
 pub mod claw_poker {
@@ -21,8 +31,9 @@ pub mod claw_poker {
 
     pub fn initialize_matchmaking_queue(
         ctx: Context<InitializeMatchmakingQueue>,
+        operator: Pubkey,
     ) -> Result<()> {
-        initialize_matchmaking_queue::handler(ctx)
+        initialize_matchmaking_queue::handler(ctx, operator)
     }
 
     pub fn enter_matchmaking_queue(

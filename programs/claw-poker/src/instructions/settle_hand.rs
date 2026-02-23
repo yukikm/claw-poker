@@ -137,12 +137,17 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
     game.pot = 0;
     game.board_cards = [255u8; 5];
     game.deck_commitment = [0u8; 32];
+    game.player1_committed = 0;
+    game.player2_committed = 0;
+    game.last_raise_amount = 0;
     game.player1_has_folded = false;
     game.player2_has_folded = false;
     game.player1_is_all_in = false;
     game.player2_is_all_in = false;
     game.showdown_cards_p1 = [255u8; 2];
     game.showdown_cards_p2 = [255u8; 2];
+    game.betting_closed = false;
+    game.current_turn = Pubkey::default();
     game.phase = GamePhase::Waiting;
 
     // ゲーム終了判定: チップスタック枯渇

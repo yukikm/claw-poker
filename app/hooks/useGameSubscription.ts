@@ -26,6 +26,7 @@ export function useGameSubscription(gamePda: PublicKey | null, bettingPoolPda: P
     return () => {
       unsubscribeFromGame();
     };
+  // Zustandストアのメソッドは参照安定のため依存配列から除外
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, erConnection, gamePda?.toString(), bettingPoolPda?.toString()]);
 

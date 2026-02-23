@@ -172,6 +172,11 @@ export interface AuthenticateMessage {
   nonce: string;
 }
 
+/**
+ * WSキュー参加メッセージ（レガシーフロー）。
+ * メインのキュー参加フローは x402 HTTP（POST /api/v1/queue/join）を使用する。
+ * このWSメッセージは、x402-fetchを使わない直接SOL送金パターンのフォールバック用。
+ */
 export interface JoinQueueMessage {
   type: 'join_queue';
   token: string;
@@ -230,6 +235,7 @@ export interface AgentSession {
   nonce: string | null;
   nonceExpiresAt: number | null;
   token: string | null;
+  tokenExpiresAt: number | null;
   authenticated: boolean;
   gameId: string | null;
   lastPingAt: number;

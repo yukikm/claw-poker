@@ -8,6 +8,45 @@ import { useAnchorProgram, getProgramId } from '@/lib/anchor';
 import { useMyBetsStore } from '@/stores/myBetsStore';
 import { type MyBet } from '@/lib/types';
 
+const ANCHOR_ERROR_MESSAGES: Record<number, string> = {
+  6000: 'ゲームが開始されていません。',
+  6001: 'ベッティングは締め切られています。',
+  6002: '残高不足です。',
+  6003: '既にベット済みです。',
+  6004: '無効なプレイヤー選択です。',
+  6005: 'ベット額が不正です。',
+};
+
+function sanitizeError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+
+  // Anchorカスタムエラーコード（例: "custom program error: 0x1770"）
+  const hexMatch = message.match(/custom program error: 0x([0-9a-fA-F]+)/);
+  if (hexMatch) {
+    const code = parseInt(hexMatch[1], 16);
+    if (ANCHOR_ERROR_MESSAGES[code]) return ANCHOR_ERROR_MESSAGES[code];
+  }
+
+  // "Error Code: <number>" 形式
+  const codeMatch = message.match(/Error Code: (\d+)/);
+  if (codeMatch) {
+    const code = parseInt(codeMatch[1], 10);
+    if (ANCHOR_ERROR_MESSAGES[code]) return ANCHOR_ERROR_MESSAGES[code];
+  }
+
+  // 残高不足のSystemProgramエラー
+  if (message.includes('insufficient funds') || message.includes('Insufficient funds')) {
+    return '残高不足です。';
+  }
+
+  // ユーザーがトランザクションを拒否した場合
+  if (message.includes('User rejected')) {
+    return 'トランザクションがキャンセルされました。';
+  }
+
+  return 'ベットの処理に失敗しました。もう一度お試しください。';
+}
+
 interface PlaceBetParams {
   gameId: bigint;
   gamePda: PublicKey;
@@ -71,7 +110,7 @@ export function usePlaceBet() {
       addBet(newBet);
       return txSig;
     } catch (err) {
-      setError(String(err));
+      setError(sanitizeError(err));
       return null;
     } finally {
       setIsLoading(false);

@@ -4,6 +4,39 @@ import { type GameSummary } from '@/lib/types';
 import { type GamePhase } from '@/lib/constants';
 import { getReadOnlyProgram } from '@/lib/anchor';
 
+/** Anchorがデコードした生のGameアカウントデータ */
+interface RawGameAccount {
+  gameId: { toString(): string };
+  phase: Record<string, unknown>;
+  handNumber: { toNumber(): number };
+  player1: PublicKey;
+  player2: PublicKey;
+  pot: { toNumber(): number };
+  winner: PublicKey | null;
+  bettingClosed: boolean;
+}
+
+/** Anchorがデコードした生のBettingPoolアカウントデータ */
+interface RawBettingPoolAccount {
+  gameId: { toString(): string };
+  totalBetPlayer1: { toNumber(): number };
+  totalBetPlayer2: { toNumber(): number };
+  betCount: number;
+  isClosed: boolean;
+}
+
+/** Anchorのaccount.all()戻り値の型 */
+interface AnchorAccountResult<T> {
+  publicKey: PublicKey;
+  account: T;
+}
+
+/** program.accountの型付きアクセス用インターフェース */
+interface TypedProgramAccounts {
+  game: { all(): Promise<AnchorAccountResult<RawGameAccount>[]> };
+  bettingPool: { all(): Promise<AnchorAccountResult<RawBettingPoolAccount>[]> };
+}
+
 export interface GamesStats {
   totalGames: number;
   activeGames: number;
@@ -67,45 +100,38 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
       const program = getReadOnlyProgram(connection);
 
       // Game と BettingPool を並列取得
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedAccounts = program.account as unknown as TypedProgramAccounts;
       const [gameAccounts, poolAccounts] = await Promise.all([
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (program.account as any).game.all(),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (program.account as any).bettingPool.all(),
+        typedAccounts.game.all(),
+        typedAccounts.bettingPool.all(),
       ]);
 
       // gameId をキーに BettingPool データをマップ化
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const poolMap = new Map<string, { totalBets: number; betCount: number; isClosed: boolean }>();
-      for (const { account } of poolAccounts as { account: unknown }[]) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pool = account as any;
-        const gameId = pool.gameId.toString() as string;
-        const totalBets =
-          (pool.totalBetPlayer1 as { toNumber(): number }).toNumber() +
-          (pool.totalBetPlayer2 as { toNumber(): number }).toNumber();
+      for (const { account } of poolAccounts) {
+        const pool = account;
+        const gameId = pool.gameId.toString();
+        const totalBets = pool.totalBetPlayer1.toNumber() + pool.totalBetPlayer2.toNumber();
         poolMap.set(gameId, {
           totalBets,
-          betCount: pool.betCount as number,
-          isClosed: pool.isClosed as boolean,
+          betCount: pool.betCount,
+          isClosed: pool.isClosed,
         });
       }
 
-      const games: GameSummary[] = (gameAccounts as { publicKey: PublicKey; account: unknown }[]).map(
+      const games: GameSummary[] = gameAccounts.map(
         ({ publicKey, account }) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const game = account as any;
-          const phase = parsePhase(game.phase as Record<string, unknown>);
+          const game = account;
+          const phase = parsePhase(game.phase);
           const gameId: bigint = BigInt(game.gameId.toString());
-          const bettingClosed = game.bettingClosed as boolean;
+          const bettingClosed = game.bettingClosed;
 
           const [bettingPoolPda] = PublicKey.findProgramAddressSync(
             [Buffer.from('betting_pool'), gameIdToBuffer(gameId)],
             programId
           );
 
-          const poolData = poolMap.get(game.gameId.toString() as string);
+          const poolData = poolMap.get(game.gameId.toString());
           // BettingPool が締め切り済み or game.betting_closed の場合はベット不可
           const isBettable =
             !bettingClosed &&
@@ -116,11 +142,11 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
             gameId,
             gamePda: publicKey,
             phase,
-            handNumber: (game.handNumber as { toNumber(): number }).toNumber(),
-            player1: game.player1 as PublicKey,
-            player2: game.player2 as PublicKey,
-            pot: (game.pot as { toNumber(): number }).toNumber(),
-            winner: game.winner as PublicKey | null,
+            handNumber: game.handNumber.toNumber(),
+            player1: game.player1,
+            player2: game.player2,
+            pot: game.pot.toNumber(),
+            winner: game.winner,
             bettingPoolPda,
             isBettable,
             bettingClosed,

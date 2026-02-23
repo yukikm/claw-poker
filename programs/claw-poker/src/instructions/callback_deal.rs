@@ -52,6 +52,8 @@ pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
         p1_state.chips_in_pot_this_hand = sb_amount;
         if p1_state.chip_stack == 0 {
             p1_state.is_all_in = true;
+            game.player1_is_all_in = true;
+            game.betting_closed = true;
         }
 
         // Player2がBBを投入
@@ -63,6 +65,8 @@ pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
         p2_state.chips_in_pot_this_hand = bb_amount;
         if p2_state.chip_stack == 0 {
             p2_state.is_all_in = true;
+            game.player2_is_all_in = true;
+            game.betting_closed = true;
         }
 
         game.player1_committed = sb_amount;
@@ -78,6 +82,8 @@ pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
         p2_state.chips_in_pot_this_hand = sb_amount;
         if p2_state.chip_stack == 0 {
             p2_state.is_all_in = true;
+            game.player2_is_all_in = true;
+            game.betting_closed = true;
         }
 
         // Player1がBBを投入
@@ -89,6 +95,8 @@ pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
         p1_state.chips_in_pot_this_hand = bb_amount;
         if p1_state.chip_stack == 0 {
             p1_state.is_all_in = true;
+            game.player1_is_all_in = true;
+            game.betting_closed = true;
         }
 
         game.player2_committed = sb_amount;

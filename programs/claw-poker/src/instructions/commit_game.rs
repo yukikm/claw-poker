@@ -17,6 +17,9 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
         // account_infos を作成する前にミュータブル借用を終了させる
         ctx.accounts.player1_state.hole_cards = [255u8; 2];
         ctx.accounts.player2_state.hole_cards = [255u8; 2];
+        // showdownカードもクリア（L1への露出防止）
+        ctx.accounts.game.showdown_cards_p1 = [255u8; 2];
+        ctx.accounts.game.showdown_cards_p2 = [255u8; 2];
 
         // ホールカードクリア後にイミュータブル借用を取得
         let account_infos = vec![

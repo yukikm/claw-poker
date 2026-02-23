@@ -5,12 +5,14 @@ use anchor_lang::prelude::*;
 pub struct MatchmakingQueue {
     /// キューエントリー（固定サイズ、最大10名）
     pub queue: [Option<QueueEntry>; 10],
-    /// リングバッファのヘッド位置
+    /// リングバッファのヘッド位置（将来の最適化用、現在は未使用）
     pub head: u8,
-    /// リングバッファのテール位置
+    /// リングバッファのテール位置（将来の最適化用、現在は未使用）
     pub tail: u8,
     /// PDAバンプ
     pub bump: u8,
+    /// オペレーター（アクセス制御用）
+    pub operator: Pubkey,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace)]

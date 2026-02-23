@@ -4,6 +4,8 @@ use crate::errors::PokerError;
 
 pub const MIN_ENTRY_FEE: u64 = 1_000_000; // 0.001 SOL
 
+/// x402プロトコルによる支払い後にオペレーターが呼び出す。
+/// SOL転送はx402が担当するため、このインストラクションはキュー登録のみ行う。
 pub fn handler(ctx: Context<EnterMatchmakingQueue>, entry_fee: u64) -> Result<()> {
     let player_key = ctx.accounts.player.key();
 
@@ -22,20 +24,7 @@ pub fn handler(ctx: Context<EnterMatchmakingQueue>, entry_fee: u64) -> Result<()
 
     require!(entry_fee >= MIN_ENTRY_FEE, PokerError::EntryFeeInsufficient);
 
-    // --- SOL転送（system_instructionを直接使用） ---
-    let ix = anchor_lang::solana_program::system_instruction::transfer(
-        &player_key,
-        &ctx.accounts.matchmaking_queue.key(),
-        entry_fee,
-    );
-    anchor_lang::solana_program::program::invoke(
-        &ix,
-        &[
-            ctx.accounts.player.to_account_info(),
-            ctx.accounts.matchmaking_queue.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ],
-    )?;
+    // SOL転送はx402プロトコルが担当。このインストラクションはキュー登録のみ。
 
     // --- 空スロットにQueueEntryを追加（mutable borrow） ---
     let clock = Clock::get()?;
@@ -56,10 +45,13 @@ pub struct EnterMatchmakingQueue<'info> {
     #[account(
         mut,
         seeds = [b"matchmaking_queue"],
-        bump = matchmaking_queue.bump
+        bump = matchmaking_queue.bump,
+        constraint = operator.key() == matchmaking_queue.operator @ PokerError::PermissionDenied,
     )]
     pub matchmaking_queue: Account<'info, MatchmakingQueue>,
-    #[account(mut)]
-    pub player: Signer<'info>,
-    pub system_program: Program<'info, System>,
+    /// プレイヤーアカウント（署名不要、operatorが代理で呼び出す）
+    /// CHECK: x402支払い済みプレイヤーのウォレットアドレス
+    pub player: AccountInfo<'info>,
+    /// オペレーター（x402支払い検証後にキュー登録を行う権限者）
+    pub operator: Signer<'info>,
 }

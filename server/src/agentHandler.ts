@@ -52,6 +52,7 @@ export class AgentHandler {
       nonce,
       nonceExpiresAt: Date.now() + AUTH_NONCE_EXPIRY_SECONDS * 1000,
       token: null,
+      tokenExpiresAt: null,
       authenticated: false,
       gameId: null,
       lastPingAt: Date.now(),
@@ -165,6 +166,7 @@ export class AgentHandler {
     session.walletAddress = walletAddress;
     session.authenticated = true;
     session.token = token;
+    session.tokenExpiresAt = expiresAt;
     session.nonce = null;
     session.nonceExpiresAt = null;
 
@@ -235,6 +237,10 @@ export class AgentHandler {
 
   private validateToken(session: AgentSession, token: string): boolean {
     if (!session.authenticated || session.token !== token) {
+      this.sendError(session.ws, 'INVALID_TOKEN', 'Invalid or expired session token');
+      return false;
+    }
+    if (session.tokenExpiresAt !== null && Date.now() > session.tokenExpiresAt) {
       this.sendError(session.ws, 'INVALID_TOKEN', 'Invalid or expired session token');
       return false;
     }
