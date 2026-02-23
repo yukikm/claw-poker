@@ -24,7 +24,10 @@ pub fn handler_player1(ctx: Context<DelegatePlayer1>, game_id: u64) -> Result<()
             system_program: ctx.accounts.system_program.as_ref(),
         },
         pda_seeds,
-        DelegateConfig::default(),
+        DelegateConfig {
+            validator: Some(ctx.accounts.validator.key()),
+            ..Default::default()
+        },
     )?;
 
     Ok(())
@@ -51,7 +54,10 @@ pub fn handler_player2(ctx: Context<DelegatePlayer2>, game_id: u64) -> Result<()
             system_program: ctx.accounts.system_program.as_ref(),
         },
         pda_seeds,
-        DelegateConfig::default(),
+        DelegateConfig {
+            validator: Some(ctx.accounts.validator.key()),
+            ..Default::default()
+        },
     )?;
 
     Ok(())
@@ -70,7 +76,10 @@ pub struct DelegatePlayer1<'info> {
     )]
     pub player_state: Account<'info, PlayerState>,
     /// CHECK: このプログラムのID
+    #[account(address = crate::ID)]
     pub owner_program: AccountInfo<'info>,
+    /// CHECK: TEE Validator
+    pub validator: AccountInfo<'info>,
     /// CHECK: MagicBlock委譲バッファPDA
     #[account(mut)]
     pub buffer: AccountInfo<'info>,
@@ -97,7 +106,10 @@ pub struct DelegatePlayer2<'info> {
     )]
     pub player_state: Account<'info, PlayerState>,
     /// CHECK: このプログラムのID
+    #[account(address = crate::ID)]
     pub owner_program: AccountInfo<'info>,
+    /// CHECK: TEE Validator
+    pub validator: AccountInfo<'info>,
     /// CHECK: MagicBlock委譲バッファPDA
     #[account(mut)]
     pub buffer: AccountInfo<'info>,

@@ -5,7 +5,6 @@ use crate::state::Game;
 
 pub fn handler(ctx: Context<DelegateGame>, game_id: u64) -> Result<()> {
     let game_id_bytes = game_id.to_le_bytes();
-    // pda_seeds は bump を含まない（内部で計算される）
     let pda_seeds: &[&[u8]] = &[b"game", game_id_bytes.as_ref()];
 
     delegate_account(
@@ -20,7 +19,10 @@ pub fn handler(ctx: Context<DelegateGame>, game_id: u64) -> Result<()> {
             system_program: ctx.accounts.system_program.as_ref(),
         },
         pda_seeds,
-        DelegateConfig::default(),
+        DelegateConfig {
+            validator: Some(ctx.accounts.validator.key()),
+            ..Default::default()
+        },
     )?;
 
     Ok(())
@@ -38,7 +40,10 @@ pub struct DelegateGame<'info> {
     )]
     pub game: Account<'info, Game>,
     /// CHECK: このプログラムのID
+    #[account(address = crate::ID)]
     pub owner_program: AccountInfo<'info>,
+    /// CHECK: TEE Validator
+    pub validator: AccountInfo<'info>,
     /// CHECK: MagicBlock委譲バッファPDA
     #[account(mut)]
     pub buffer: AccountInfo<'info>,

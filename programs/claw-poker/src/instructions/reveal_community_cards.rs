@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::{Game, GamePhase};
+use crate::state::{Game, GamePhase, PlayerState};
 use crate::utils::shuffle_deck;
 use crate::errors::PokerError;
 
@@ -92,6 +92,10 @@ pub fn handler(
     game.last_raise_amount = 0;
     game.street_action_taken = false;
 
+    // PlayerStateのchips_committedもリセット（ストリート単位のコミット額）
+    ctx.accounts.player1_state.chips_committed = 0;
+    ctx.accounts.player2_state.chips_committed = 0;
+
     // Postflopアクション順: BBプレイヤー（非ディーラー）が先手
     game.current_turn = if game.dealer_position == 0 {
         game.player2 // Player2がBB（非ディーラー）
@@ -112,5 +116,19 @@ pub struct RevealCommunityCards<'info> {
         constraint = operator.key() == game.operator @ PokerError::PermissionDenied,
     )]
     pub game: Account<'info, Game>,
+    #[account(
+        mut,
+        seeds = [b"player_state", game_id.to_le_bytes().as_ref(), game.player1.as_ref()],
+        bump = player1_state.bump,
+        constraint = player1_state.game_id == game.game_id @ PokerError::InvalidAction,
+    )]
+    pub player1_state: Account<'info, PlayerState>,
+    #[account(
+        mut,
+        seeds = [b"player_state", game_id.to_le_bytes().as_ref(), game.player2.as_ref()],
+        bump = player2_state.bump,
+        constraint = player2_state.game_id == game.game_id @ PokerError::InvalidAction,
+    )]
+    pub player2_state: Account<'info, PlayerState>,
     pub operator: Signer<'info>,
 }

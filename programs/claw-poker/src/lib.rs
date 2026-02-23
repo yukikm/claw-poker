@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use ephemeral_rollups_sdk::anchor::ephemeral;
 
 pub mod errors;
 pub mod instructions;
@@ -9,6 +10,7 @@ use instructions::*;
 
 declare_id!("6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo");
 
+#[ephemeral]
 #[program]
 pub mod claw_poker {
     use super::*;

@@ -37,6 +37,11 @@ pub fn handler(ctx: Context<HandleTimeout>, _game_id: u64) -> Result<()> {
 
     // タイムアウトしたプレイヤーのハンドをフォールド
     ctx.accounts.timed_out_player_state.is_folded = true;
+    if is_player1_turn {
+        game.player1_has_folded = true;
+    } else {
+        game.player2_has_folded = true;
+    }
     game.current_turn = Pubkey::default();
 
     // last_action_atをリセット（次ハンドのタイムアウトクロック再スタート）

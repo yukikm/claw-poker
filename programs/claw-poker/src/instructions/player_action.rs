@@ -100,7 +100,27 @@ pub fn handler(
             }
 
             update_game_committed(game, is_player1, player_state.chips_committed);
-            game.current_turn = opponent_key;
+
+            // Postflop Call後: 両者のcommitted額が等しければラウンド終了
+            let my_committed_after = player_state.chips_committed;
+            if my_committed_after == opp_committed {
+                match game.phase {
+                    GamePhase::Flop | GamePhase::Turn => {
+                        // ラウンド終了シグナル: オペレーターがreveal_community_cardsを呼ぶ
+                        game.current_turn = Pubkey::default();
+                    }
+                    GamePhase::River => {
+                        game.phase = GamePhase::Showdown;
+                        game.current_turn = Pubkey::default();
+                    }
+                    _ => {
+                        // Preflop: BB Optionがあるのでターンを相手に渡す
+                        game.current_turn = opponent_key;
+                    }
+                }
+            } else {
+                game.current_turn = opponent_key;
+            }
         }
 
         PlayerAction::Bet => {

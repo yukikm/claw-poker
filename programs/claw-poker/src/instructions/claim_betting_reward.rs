@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::{BetRecord, BettingPool, Game};
 use crate::errors::PokerError;
 
-pub fn handler(ctx: Context<ClaimBettingReward>, game_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<ClaimBettingReward>, _game_id: u64) -> Result<()> {
     let pool = &ctx.accounts.betting_pool;
     let bet_record = &ctx.accounts.bet_record;
     let bet_amount = bet_record.amount;
@@ -55,27 +55,10 @@ pub fn handler(ctx: Context<ClaimBettingReward>, game_id: u64) -> Result<()> {
     // Effects before Interactions: 先にclaimedをtrueに設定（再入攻撃防止）
     ctx.accounts.bet_record.claimed = true;
 
-    let pool_bump = ctx.accounts.betting_pool.bump;
-    let game_id_bytes = game_id.to_le_bytes();
-    let seeds: &[&[u8]] = &[b"betting_pool", game_id_bytes.as_ref(), &[pool_bump]];
-    let signer_seeds = &[seeds];
-
-    // ベッターにpayoutを転送
+    // BettingPool PDAはclaw-pokerプログラム所有なのでlamport直接操作
     if actual_payout > 0 {
-        let ix = anchor_lang::solana_program::system_instruction::transfer(
-            &ctx.accounts.betting_pool.key(),
-            &ctx.accounts.bettor.key(),
-            actual_payout,
-        );
-        anchor_lang::solana_program::program::invoke_signed(
-            &ix,
-            &[
-                ctx.accounts.betting_pool.to_account_info(),
-                ctx.accounts.bettor.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            signer_seeds,
-        )?;
+        **ctx.accounts.betting_pool.to_account_info().try_borrow_mut_lamports()? -= actual_payout;
+        **ctx.accounts.bettor.to_account_info().try_borrow_mut_lamports()? += actual_payout;
     }
 
     Ok(())
@@ -106,5 +89,4 @@ pub struct ClaimBettingReward<'info> {
     pub bet_record: Account<'info, BetRecord>,
     #[account(mut)]
     pub bettor: Signer<'info>,
-    pub system_program: Program<'info, System>,
 }

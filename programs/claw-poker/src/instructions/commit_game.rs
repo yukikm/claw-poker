@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use ephemeral_rollups_sdk::anchor::commit;
 use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accounts};
 use ephemeral_rollups_sdk::access_control::instructions::CommitAndUndelegatePermissionCpiBuilder;
 use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
@@ -96,6 +97,7 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
     Ok(())
 }
 
+#[commit]
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct CommitGame<'info> {
@@ -135,9 +137,4 @@ pub struct CommitGame<'info> {
     /// CHECK: MagicBlock Permission Program
     #[account(address = PERMISSION_PROGRAM_ID)]
     pub permission_program: AccountInfo<'info>,
-    /// CHECK: MagicBlock Magic Context
-    #[account(mut)]
-    pub magic_context: AccountInfo<'info>,
-    /// CHECK: MagicBlock Magic Program
-    pub magic_program: AccountInfo<'info>,
 }

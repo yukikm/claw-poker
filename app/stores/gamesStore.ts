@@ -25,6 +25,15 @@ interface GamesStore {
   error: string | null;
   fetchGames: (connection: Connection, programId: PublicKey) => Promise<void>;
   updateGame: (gamePda: PublicKey, update: Partial<GameSummary>) => void;
+  startPolling: (connection: Connection, programId: PublicKey) => void;
+  stopPolling: () => void;
+}
+
+function gameIdToBuffer(gameId: bigint): Buffer {
+  const buf = Buffer.alloc(8);
+  const view = new DataView(buf.buffer);
+  view.setBigUint64(0, gameId, true); // little-endian
+  return buf;
 }
 
 function parsePhase(phase: Record<string, unknown>): GamePhase {
@@ -44,7 +53,9 @@ function parsePhase(phase: Record<string, unknown>): GamePhase {
 
 const IN_PROGRESS_PHASES: GamePhase[] = ['Shuffling', 'PreFlop', 'Flop', 'Turn', 'River', 'Showdown'];
 
-export const useGamesStore = create<GamesStore>((set) => ({
+let pollingInterval: ReturnType<typeof setInterval> | null = null;
+
+export const useGamesStore = create<GamesStore>((set, get) => ({
   games: [],
   stats: INITIAL_STATS,
   isLoading: false,
@@ -90,7 +101,7 @@ export const useGamesStore = create<GamesStore>((set) => ({
           const bettingClosed = game.bettingClosed as boolean;
 
           const [bettingPoolPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('betting_pool'), Buffer.from(new BigUint64Array([gameId]).buffer)],
+            [Buffer.from('betting_pool'), gameIdToBuffer(gameId)],
             programId
           );
 
@@ -140,5 +151,20 @@ export const useGamesStore = create<GamesStore>((set) => ({
         g.gamePda.equals(gamePda) ? { ...g, ...update } : g
       ),
     }));
+  },
+
+  startPolling: (connection: Connection, programId: PublicKey) => {
+    if (pollingInterval) return;
+    get().fetchGames(connection, programId);
+    pollingInterval = setInterval(() => {
+      get().fetchGames(connection, programId);
+    }, 30_000);
+  },
+
+  stopPolling: () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      pollingInterval = null;
+    }
   },
 }));

@@ -4,7 +4,7 @@ use ephemeral_rollups_sdk::access_control::instructions::{
 };
 use ephemeral_rollups_sdk::access_control::structs::{
     Member, MembersArgs,
-    AUTHORITY_FLAG, TX_LOGS_FLAG, TX_BALANCES_FLAG, TX_MESSAGE_FLAG, ACCOUNT_SIGNATURES_FLAG,
+    AUTHORITY_FLAG, TX_LOGS_FLAG,
 };
 use crate::state::PlayerState;
 
@@ -17,7 +17,7 @@ fn create_permission_for_player<'info>(
     game_id: u64,
     player_bump: u8,
 ) -> Result<()> {
-    let flags = AUTHORITY_FLAG | TX_LOGS_FLAG | TX_BALANCES_FLAG | TX_MESSAGE_FLAG | ACCOUNT_SIGNATURES_FLAG;
+    let flags = AUTHORITY_FLAG | TX_LOGS_FLAG;
     let members = vec![Member { flags, pubkey: player_key }];
 
     let ix = CreatePermission {

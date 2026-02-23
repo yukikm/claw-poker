@@ -77,4 +77,8 @@ pub struct ResolveGame<'info> {
         constraint = !betting_pool.distributed @ PokerError::GameAlreadyCompleted,
     )]
     pub betting_pool: Account<'info, BettingPool>,
+    #[account(
+        constraint = operator.key() == game.operator @ PokerError::PermissionDenied
+    )]
+    pub operator: Signer<'info>,
 }

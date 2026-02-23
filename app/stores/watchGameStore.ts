@@ -31,6 +31,13 @@ interface WatchGameStore {
   setBettingPool: (pool: BettingPoolState) => void;
 }
 
+function gameIdToBuffer(gameId: bigint): Buffer {
+  const buf = Buffer.alloc(8);
+  const view = new DataView(buf.buffer);
+  view.setBigUint64(0, gameId, true); // little-endian
+  return buf;
+}
+
 function parsePhase(phase: Record<string, unknown>): GamePhase {
   const phaseMap: Record<string, GamePhase> = {
     waiting: 'Waiting',
@@ -57,7 +64,7 @@ function mapGameAccount(
   const gameId: bigint = BigInt(rawGame.gameId.toString());
 
   const [bettingPoolPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('betting_pool'), Buffer.from(new BigUint64Array([gameId]).buffer)],
+    [Buffer.from('betting_pool'), gameIdToBuffer(gameId)],
     programId
   );
 

@@ -31,7 +31,10 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
 
   const { odds1, odds2 } = formatOdds(pool?.totalBetPlayer1 ?? 0, pool?.totalBetPlayer2 ?? 0);
   const selectedOdds = playerChoice === 1 ? odds1 : odds2;
-  const estimatedPayout = betLamports * parseFloat(selectedOdds || '1');
+  const parsedOdds = parseFloat(selectedOdds);
+  const estimatedPayout = isFinite(parsedOdds) && parsedOdds > 0
+    ? betLamports * parsedOdds
+    : null;
 
   const handleBet = async () => {
     if (!publicKey || !isBettable || betLamports < MIN_BET_LAMPORTS) return;
@@ -118,7 +121,9 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
           {/* Payout estimate */}
           <div className="flex justify-between text-xs text-slate-500">
             <span>予想配当</span>
-            <span className="text-green-300 font-mono">{formatSol(estimatedPayout, 4)} SOL</span>
+            <span className="text-green-300 font-mono">
+              {estimatedPayout !== null ? `${formatSol(estimatedPayout, 4)} SOL` : '--'}
+            </span>
           </div>
 
           {error && (

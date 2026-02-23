@@ -110,8 +110,16 @@ pub struct CallbackDeal<'info> {
         constraint = game.phase == GamePhase::Shuffling @ PokerError::InvalidAction,
     )]
     pub game: Account<'info, Game>,
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"player_state", game.game_id.to_le_bytes().as_ref(), game.player1.as_ref()],
+        bump = player1_state.bump,
+    )]
     pub player1_state: Account<'info, PlayerState>,
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"player_state", game.game_id.to_le_bytes().as_ref(), game.player2.as_ref()],
+        bump = player2_state.bump,
+    )]
     pub player2_state: Account<'info, PlayerState>,
 }
