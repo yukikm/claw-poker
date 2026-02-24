@@ -1,4 +1,5 @@
 import { getConnectionState } from '../connectionState';
+import type { OpenClawPluginApi } from '../types';
 
 type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in';
 
@@ -12,7 +13,7 @@ interface ActionResult {
 const VALID_ACTIONS: ActionType[] = ['fold', 'check', 'call', 'bet', 'raise', 'all_in'];
 const SAFETY_TIMEOUT_MS = 28_000; // 28 seconds (2 seconds safety margin from 30s limit)
 
-export function registerPokerAction(api: { registerTool: (tool: unknown) => void }): void {
+export function registerPokerAction(api: OpenClawPluginApi): void {
   api.registerTool({
     name: 'poker_action',
     description:
@@ -33,7 +34,9 @@ export function registerPokerAction(api: { registerTool: (tool: unknown) => void
       },
       required: ['action'],
     },
-    execute: async (params: { action: string; amount?: number }): Promise<ActionResult> => {
+    execute: async (params: Record<string, unknown>): Promise<ActionResult> => {
+      const action = params['action'] as ActionType;
+      const amount = params['amount'] as number | undefined;
       const state = getConnectionState();
 
       if (!state.connected || !state.authenticated || !state.ws) {
@@ -50,7 +53,6 @@ export function registerPokerAction(api: { registerTool: (tool: unknown) => void
         };
       }
 
-      const action = params.action as ActionType;
       if (!VALID_ACTIONS.includes(action)) {
         return {
           success: false,
@@ -59,7 +61,7 @@ export function registerPokerAction(api: { registerTool: (tool: unknown) => void
       }
 
       // Validate amount for bet/raise
-      if ((action === 'bet' || action === 'raise') && params.amount === undefined) {
+      if ((action === 'bet' || action === 'raise') && amount === undefined) {
         return {
           success: false,
           message: `INVALID_AMOUNT: ${action}にはamount（金額）の指定が必要です`,
@@ -108,8 +110,8 @@ export function registerPokerAction(api: { registerTool: (tool: unknown) => void
           action,
         };
 
-        if (params.amount !== undefined) {
-          payload.amount = params.amount;
+        if (amount !== undefined) {
+          payload.amount = amount;
         }
 
         state.ws?.send(JSON.stringify(payload));

@@ -34,6 +34,14 @@ pub fn handler(
 
     let player_state = &mut ctx.accounts.player_state;
 
+    // betting_closed（AllIn発生済み）の場合はFold/Callのみ許可
+    if game.betting_closed {
+        require!(
+            matches!(action, PlayerAction::Fold | PlayerAction::Call),
+            PokerError::BettingClosed
+        );
+    }
+
     match action {
         PlayerAction::Fold => {
             player_state.is_folded = true;
@@ -54,6 +62,10 @@ pub fn handler(
                 game.current_turn = Pubkey::default();
             } else if was_action_taken {
                 // PostFlop: 2人目のCheckでラウンド終了シグナル
+                if game.phase == GamePhase::River {
+                    // River Check-Check → Showdownに遷移
+                    game.phase = GamePhase::Showdown;
+                }
                 game.current_turn = Pubkey::default();
             } else {
                 // PostFlop: 1人目のCheck → ターンを相手に切り替え
@@ -62,13 +74,11 @@ pub fn handler(
         }
 
         PlayerAction::Call => {
-            let call_amount = if opp_committed > my_committed {
-                // スタック不足の場合は自動All-in
-                let needed = opp_committed.saturating_sub(my_committed);
-                needed.min(player_state.chip_stack)
-            } else {
-                0
-            };
+            // Callは相手のコミット額が自分より大きい場合のみ有効（同額ならCheckを使う）
+            require!(opp_committed > my_committed, PokerError::InvalidAction);
+            // スタック不足の場合は自動All-in
+            let needed = opp_committed.saturating_sub(my_committed);
+            let call_amount = needed.min(player_state.chip_stack);
 
             if call_amount >= player_state.chip_stack && player_state.chip_stack > 0 {
                 // 自動All-in
@@ -229,7 +239,17 @@ pub fn handler(
             game.betting_closed = true;
 
             update_game_committed(game, is_player1, player_state.chips_committed);
-            game.current_turn = opponent_key;
+
+            // AllIn後のcommitted額で判断:
+            // - CallとしてのAllIn (new_committed <= opp_committed): 相手のターン不要
+            // - RaiseとしてのAllIn (new_committed > opp_committed): 相手にCall/Foldの機会
+            if new_all_in_committed > opp_committed {
+                // RaiseとしてのAllIn: 相手はCall/Foldを選択する
+                game.current_turn = opponent_key;
+            } else {
+                // CallとしてのAllIn: ベッティング完了
+                game.current_turn = Pubkey::default();
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { getConnectionState } from '../connectionState';
+import type { OpenClawPluginApi } from '../types';
 
 // x402-fetchのインポート（インストール済みの場合）
 type FetchWithPayment = (url: string, options?: RequestInit) => Promise<Response>;
@@ -8,17 +9,9 @@ type FetchWithPayment = (url: string, options?: RequestInit) => Promise<Response
 async function createX402Fetch(keypair: Keypair, rpcUrl: string): Promise<FetchWithPayment> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { wrapFetchWithPayment } = require('x402-fetch') as {
-      wrapFetchWithPayment: (
-        fetchFn: typeof fetch,
-        wallet: unknown,
-        opts?: { maxValue?: number },
-      ) => FetchWithPayment;
-    };
+    const { wrapFetchWithPayment } = require('x402-fetch');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { createSolanaKeypairWallet } = require('x402-fetch/solana') as {
-      createSolanaKeypairWallet: (keypair: Keypair, rpcUrl: string) => unknown;
-    };
+    const { createSolanaKeypairWallet } = require('x402-fetch/solana');
 
     const wallet = createSolanaKeypairWallet(keypair, rpcUrl);
     return wrapFetchWithPayment(fetch, wallet, { maxValue: 1.0 });
@@ -29,7 +22,7 @@ async function createX402Fetch(keypair: Keypair, rpcUrl: string): Promise<FetchW
   }
 }
 
-export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => void }): void {
+export function registerPokerJoinQueue(api: OpenClawPluginApi): void {
   api.registerTool({
     name: 'poker_join_queue',
     description:
@@ -44,7 +37,8 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
       },
       required: [],
     },
-    execute: async (params: { entry_fee_sol?: number }) => {
+    execute: async (params: Record<string, unknown>) => {
+      const entry_fee_sol = params['entry_fee_sol'] as number | undefined;
       const state = getConnectionState();
 
       if (!state.connected || !state.authenticated || !state.ws) {
@@ -72,6 +66,7 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
 
       const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
       const serverHttpUrl = process.env.CLAW_POKER_SERVER_HTTP_URL ?? 'http://localhost:3001';
+      const feeSol = entry_fee_sol ?? 0.1;
 
       // x402-fetchでHTTPリクエストを送信（402レスポンス時に自動でSolana支払いTXを作成・送信）
       let response: Response;
@@ -84,6 +79,7 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             walletAddress: keypair.publicKey.toBase58(),
+            entryFeeSol: feeSol,
           }),
         });
       } catch (err) {
@@ -114,8 +110,8 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
           resolve({
             success: true,
             status: 'queued',
-            entryFeeSol: 0.1,
-            message: `マッチメイキングキューに参加しました。参加費 0.1 SOL を支払いました。対戦相手のマッチングをお待ちください。`,
+            entryFeeSol: feeSol,
+            message: `マッチメイキングキューに参加しました。参加費 ${feeSol} SOL を支払いました。対戦相手のマッチングをお待ちください。`,
           });
         }, 5_000);
 
@@ -128,8 +124,8 @@ export function registerPokerJoinQueue(api: { registerTool: (tool: unknown) => v
               resolve({
                 success: true,
                 status: 'queued',
-                entryFeeSol: 0.1,
-                message: `マッチメイキングキューに参加しました（位置: ${message.position}）。参加費 0.1 SOL を支払いました。`,
+                entryFeeSol: feeSol,
+                message: `マッチメイキングキューに参加しました（位置: ${message.position}）。参加費 ${feeSol} SOL を支払いました。`,
               });
             } else if (message.type === 'error') {
               clearTimeout(timeout);

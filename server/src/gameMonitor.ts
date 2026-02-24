@@ -22,6 +22,7 @@ export interface DecodedGameState {
   consecutiveTimeoutsP1: number;
   consecutiveTimeoutsP2: number;
   lastRaiseAmount: number;
+  lastCheckpointHand: number;
   player1Committed: number;
   player2Committed: number;
   winner: string | null;
@@ -158,7 +159,7 @@ export class GameMonitor {
       const lastRaiseAmount = Number(data.readBigUInt64LE(offset));
       offset += 8;
 
-      // last_checkpoint_hand (u64) - skip
+      const lastCheckpointHand = Number(data.readBigUInt64LE(offset));
       offset += 8;
 
       // winner: Option<Pubkey> (1 byte tag + 32 bytes if Some)
@@ -219,6 +220,7 @@ export class GameMonitor {
         consecutiveTimeoutsP1,
         consecutiveTimeoutsP2,
         lastRaiseAmount,
+        lastCheckpointHand,
         player1Committed,
         player2Committed,
         winner,

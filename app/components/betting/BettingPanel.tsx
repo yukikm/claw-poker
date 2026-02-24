@@ -123,6 +123,24 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
             />
           </div>
 
+          {/* Bet slider */}
+          <div>
+            <input
+              type="range"
+              min={MIN_BET_LAMPORTS / LAMPORTS_PER_SOL}
+              max={MAX_BET_LAMPORTS / LAMPORTS_PER_SOL}
+              step="0.1"
+              value={parseFloat(betSol) || MIN_BET_LAMPORTS / LAMPORTS_PER_SOL}
+              onChange={(e) => setBetSol(e.target.value)}
+              className="w-full h-1.5 rounded-full appearance-none bg-slate-700 accent-cyan-400 cursor-pointer"
+              aria-label="ベット額スライダー"
+            />
+            <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
+              <span>{MIN_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL</span>
+              <span>{MAX_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL</span>
+            </div>
+          </div>
+
           {/* Presets */}
           <div className="flex gap-2" role="group" aria-label="ベット額プリセット">
             {BET_PRESETS.map((sol) => (

@@ -85,7 +85,7 @@ export function usePlaceBet() {
 
       const txSig = await program.methods
         .placeSpectatorBet(new BN(gameId.toString()), playerChoice, new BN(amount))
-        .accounts({
+        .accountsPartial({
           bettingPool: bettingPoolPda,
           game: gamePda,
           betRecord: betRecordPda,

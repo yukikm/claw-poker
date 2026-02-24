@@ -47,7 +47,7 @@ export default function GameWatchPage({ params }: PageProps) {
   if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="glass rounded-3xl h-[500px] animate-pulse flex items-center justify-center">
+        <div className="glass rounded-3xl h-[500px] animate-pulse flex items-center justify-center" role="status" aria-label="読み込み中">
           <p className="text-slate-500">ゲームデータを読み込み中...</p>
         </div>
       </div>

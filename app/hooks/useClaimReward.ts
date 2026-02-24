@@ -7,6 +7,39 @@ import { BN } from '@coral-xyz/anchor';
 import { useAnchorProgram, getProgramId } from '@/lib/anchor';
 import { useMyBetsStore } from '@/stores/myBetsStore';
 
+const ANCHOR_ERROR_MESSAGES: Record<number, string> = {
+  6006: '報酬はすでにクレーム済みです。',
+  6007: 'このゲームはまだ終了していません。',
+  6008: 'ベットが見つかりません。',
+  6009: 'このゲームに勝者が決定されていません。',
+};
+
+function sanitizeClaimError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+
+  const hexMatch = message.match(/custom program error: 0x([0-9a-fA-F]+)/);
+  if (hexMatch) {
+    const code = parseInt(hexMatch[1], 16);
+    if (ANCHOR_ERROR_MESSAGES[code]) return ANCHOR_ERROR_MESSAGES[code];
+  }
+
+  const codeMatch = message.match(/Error Code: (\d+)/);
+  if (codeMatch) {
+    const code = parseInt(codeMatch[1], 10);
+    if (ANCHOR_ERROR_MESSAGES[code]) return ANCHOR_ERROR_MESSAGES[code];
+  }
+
+  if (message.includes('insufficient funds') || message.includes('Insufficient funds')) {
+    return '残高不足です。';
+  }
+
+  if (message.includes('User rejected')) {
+    return 'トランザクションがキャンセルされました。';
+  }
+
+  return '報酬のクレームに失敗しました。もう一度お試しください。';
+}
+
 export function useClaimReward() {
   const { publicKey } = useWallet();
   const program = useAnchorProgram();
@@ -41,7 +74,7 @@ export function useClaimReward() {
 
       const txSig = await program.methods
         .claimBettingReward(new BN(gameId.toString()))
-        .accounts({
+        .accountsPartial({
           bettingPool: bettingPoolPda,
           game: gamePda,
           betRecord: betRecordPda,
@@ -52,7 +85,7 @@ export function useClaimReward() {
       updateBetStatus(betRecordPda.toString(), 'claimed');
       return txSig;
     } catch (err) {
-      setError(String(err));
+      setError(sanitizeClaimError(err));
       return null;
     } finally {
       setIsLoading(false);

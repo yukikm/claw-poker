@@ -93,17 +93,20 @@ describe("claw-poker", () => {
     before(async () => {
       await airdrop(player1.publicKey, 2);
       await airdrop(player2.publicKey, 2);
+      await airdrop(operator.publicKey, 5);
     });
 
     it("initializeMatchmakingQueue: キューを初期化できる", async () => {
-      // In Anchor 0.32, PDAs with known seeds are auto-resolved
-      // Only non-PDA accounts need to be passed
+      const [queuePda] = getMatchmakingQueuePda();
+
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (program.methods as any)
-          .initializeMatchmakingQueue()
+          .initializeMatchmakingQueue(operator.publicKey)
           .accounts({
+            matchmakingQueue: queuePda,
             authority: payer.publicKey,
+            operator: operator.publicKey,
             systemProgram: SystemProgram.programId,
           })
           .rpc();
@@ -112,31 +115,37 @@ describe("claw-poker", () => {
         if (!msg.includes("already in use")) throw e;
       }
 
-      const [queuePda] = getMatchmakingQueuePda();
       const queue = await program.account.matchmakingQueue.fetch(queuePda);
       assert.isNotNull(queue, "MatchmakingQueueが作成されている");
     });
 
     it("enterMatchmakingQueue: Player1がキューに参加できる", async () => {
       const entryFee = new BN(LAMPORTS_PER_SOL / 100); // 0.01 SOL
+      const [queuePda] = getMatchmakingQueuePda();
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .enterMatchmakingQueue(entryFee)
         .accounts({
+          matchmakingQueue: queuePda,
           player: player1.publicKey,
-          systemProgram: SystemProgram.programId,
+          operator: operator.publicKey,
         })
-        .signers([player1])
+        .signers([operator])
         .rpc();
 
-      const [queuePda] = getMatchmakingQueuePda();
       const queue = await program.account.matchmakingQueue.fetch(queuePda);
       const entries = (queue.queue as unknown[]).filter((e) => e !== null);
       assert.isAbove(entries.length, 0, "Player1がキューに追加された");
     });
 
     it("leaveMatchmakingQueue: Player1がキューから離脱できる", async () => {
+      // leaveMatchmakingQueueはキューPDAからentryFee分のSOLをプレイヤーに返金する。
+      // テスト環境ではenterMatchmakingQueueがSOLを転送しない（x402担当）ため、
+      // キューPDAにSOLを補充してから離脱テストを行う。
+      const [queuePda] = getMatchmakingQueuePda();
+      await airdrop(queuePda, 1);
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .leaveMatchmakingQueue()
@@ -152,10 +161,11 @@ describe("claw-poker", () => {
       await (program.methods as any)
         .enterMatchmakingQueue(entryFee)
         .accounts({
+          matchmakingQueue: queuePda,
           player: player1.publicKey,
-          systemProgram: SystemProgram.programId,
+          operator: operator.publicKey,
         })
-        .signers([player1])
+        .signers([operator])
         .rpc();
 
       // Also enter player2
@@ -163,10 +173,11 @@ describe("claw-poker", () => {
       await (program.methods as any)
         .enterMatchmakingQueue(entryFee)
         .accounts({
+          matchmakingQueue: queuePda,
           player: player2.publicKey,
-          systemProgram: SystemProgram.programId,
+          operator: operator.publicKey,
         })
-        .signers([player2])
+        .signers([operator])
         .rpc();
     });
   });
@@ -224,7 +235,6 @@ describe("claw-poker", () => {
     it("createGameVault: GameVaultを作成できる", async () => {
       const [gamePda] = getGamePda(GAME_ID);
       const [vaultPda] = getGameVaultPda(GAME_ID);
-      const [queuePda] = getMatchmakingQueuePda();
       const gameIdBn = new BN(GAME_ID.toString());
 
       try {
@@ -235,10 +245,11 @@ describe("claw-poker", () => {
           .accounts({
             game: gamePda,
             gameVault: vaultPda,
-            matchmakingQueue: queuePda,
+            operator: operator.publicKey,
             payer: payer.publicKey,
             systemProgram: SystemProgram.programId,
           })
+          .signers([operator])
           .rpc();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -457,7 +468,7 @@ describe("claw-poker", () => {
     const GAME_ID = BigInt(1);
     const gameIdBn = new BN(GAME_ID.toString());
 
-    it("shuffleAndDeal: カードを配布してPreFlopに遷移できる", async () => {
+    it("testShuffleAndDeal: カードを配布してPreFlopに遷移できる", async () => {
       const [gamePda] = getGamePda(GAME_ID);
       const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
       const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
@@ -465,7 +476,7 @@ describe("claw-poker", () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .shuffleAndDeal(gameIdBn, randomSeed)
+        .testShuffleAndDeal(gameIdBn, randomSeed)
         .accounts({
           game: gamePda,
           operator: operator.publicKey,
@@ -484,23 +495,28 @@ describe("claw-poker", () => {
       assert.notEqual(p1State.holeCards[0], 255, "Player1にカードが配られた");
     });
 
-    it("playerAction: Player1がFoldできる", async () => {
+    it("playerAction: SBプレイヤーがFoldできる", async () => {
       const [gamePda] = getGamePda(GAME_ID);
-      const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
+      const game = await program.account.game.fetch(gamePda);
+      const currentTurn = game.currentTurn as PublicKey;
+      const currentPlayerStatePda = currentTurn.equals(player1.publicKey)
+        ? getPlayerStatePda(GAME_ID, player1.publicKey)[0]
+        : getPlayerStatePda(GAME_ID, player2.publicKey)[0];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { fold: {} }, null)
         .accounts({
           game: gamePda,
-          playerState: p1StatePda,
-          player: player1.publicKey,
+          playerState: currentPlayerStatePda,
+          player: currentTurn,
+          operator: operator.publicKey,
         })
-        .signers([player1])
+        .signers([operator])
         .rpc();
 
-      const p1State = await program.account.playerState.fetch(p1StatePda);
-      assert.isTrue(p1State.isFolded, "Player1がFoldした");
+      const playerState = await program.account.playerState.fetch(currentPlayerStatePda);
+      assert.isTrue(playerState.isFolded, "SBプレイヤーがFoldした");
     });
 
     it("settleHand: Player2がFold勝利でポットを獲得できる", async () => {
@@ -575,7 +591,7 @@ describe("claw-poker", () => {
       assert.isFalse(game.bettingClosed, "ベット受付がリセットされた");
     });
 
-    it("shuffleAndDeal: 2ハンド目のカードを配布できる", async () => {
+    it("testShuffleAndDeal: 2ハンド目のカードを配布できる", async () => {
       const [gamePda] = getGamePda(GAME_ID);
       const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
       const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
@@ -583,7 +599,7 @@ describe("claw-poker", () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .shuffleAndDeal(gameIdBn, randomSeed)
+        .testShuffleAndDeal(gameIdBn, randomSeed)
         .accounts({
           game: gamePda,
           operator: operator.publicKey,
@@ -614,16 +630,16 @@ describe("claw-poker", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { call: {} }, null)
-        .accounts({ game: gamePda, playerState: sbStatePda, player: sbPlayer.publicKey })
-        .signers([sbPlayer])
+        .accounts({ game: gamePda, playerState: sbStatePda, player: sbPlayer.publicKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       // BBがCheckでオプションを放棄
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: bbStatePda, player: bbPlayer.publicKey })
-        .signers([bbPlayer])
+        .accounts({ game: gamePda, playerState: bbStatePda, player: bbPlayer.publicKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       const gameAfter = await program.account.game.fetch(gamePda);
@@ -636,19 +652,30 @@ describe("claw-poker", () => {
 
     it("revealCommunityCards: Flopを公開できる", async () => {
       const [gamePda] = getGamePda(GAME_ID);
+      const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
+      const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
+
+      // ホールカードと重複しないカードを選ぶ
+      const p1State = await program.account.playerState.fetch(p1StatePda);
+      const p2State = await program.account.playerState.fetch(p2StatePda);
+      const usedCards = new Set([
+        p1State.holeCards[0], p1State.holeCards[1],
+        p2State.holeCards[0], p2State.holeCards[1],
+      ]);
+      const available = Array.from({ length: 52 }, (_, i) => i).filter(c => !usedCards.has(c));
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .revealCommunityCards(gameIdBn, { flop: {} }, Buffer.from([4, 5, 6]))
-        .accounts({ game: gamePda, operator: operator.publicKey })
+        .revealCommunityCards(gameIdBn, { flop: {} }, Buffer.from([available[0], available[1], available[2]]))
+        .accounts({ game: gamePda, player1State: p1StatePda, player2State: p2StatePda, operator: operator.publicKey })
         .signers([operator])
         .rpc();
 
       const game = await program.account.game.fetch(gamePda);
       assert.deepEqual(game.phase, { flop: {} }, "フェーズがFlopになった");
-      assert.equal(game.boardCards[0], 4);
-      assert.equal(game.boardCards[1], 5);
-      assert.equal(game.boardCards[2], 6);
+      assert.equal(game.boardCards[0], available[0]);
+      assert.equal(game.boardCards[1], available[1]);
+      assert.equal(game.boardCards[2], available[2]);
       assert.equal(game.player1Committed.toNumber(), 0, "コミット額がリセットされた");
     });
 
@@ -667,64 +694,77 @@ describe("claw-poker", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: firstStatePda, player: firstPlayer.publicKey })
-        .signers([firstPlayer])
+        .accounts({ game: gamePda, playerState: firstStatePda, player: firstPlayer.publicKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: secondStatePda, player: secondPlayer.publicKey })
-        .signers([secondPlayer])
+        .accounts({ game: gamePda, playerState: secondStatePda, player: secondPlayer.publicKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
     });
 
     it("revealCommunityCards: TurnとRiverを公開できる", async () => {
       const [gamePda] = getGamePda(GAME_ID);
+      const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
+      const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
+
+      // ホールカードと既存のFlopカードを除外して安全なカードを選ぶ
+      const p1State = await program.account.playerState.fetch(p1StatePda);
+      const p2State = await program.account.playerState.fetch(p2StatePda);
+      const gameBefore = await program.account.game.fetch(gamePda);
+      const usedCards = new Set([
+        p1State.holeCards[0], p1State.holeCards[1],
+        p2State.holeCards[0], p2State.holeCards[1],
+        ...gameBefore.boardCards.filter((c: number) => c !== 255),
+      ]);
+      const available = Array.from({ length: 52 }, (_, i) => i).filter(c => !usedCards.has(c));
+      const turnCard = available[0];
+      const riverCard = available[1];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .revealCommunityCards(gameIdBn, { turn: {} }, Buffer.from([20]))
-        .accounts({ game: gamePda, operator: operator.publicKey })
+        .revealCommunityCards(gameIdBn, { turn: {} }, Buffer.from([turnCard]))
+        .accounts({ game: gamePda, player1State: p1StatePda, player2State: p2StatePda, operator: operator.publicKey })
         .signers([operator])
         .rpc();
 
       let game = await program.account.game.fetch(gamePda);
       assert.deepEqual(game.phase, { turn: {} });
-      assert.equal(game.boardCards[3], 20);
+      assert.equal(game.boardCards[3], turnCard);
 
-      // Turn: Check-Check
-      const firstPlayer = game.dealerPosition === 0 ? player2 : player1;
-      const secondPlayer = game.dealerPosition === 0 ? player1 : player2;
-      const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
-      const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
-      const firstStatePda = game.dealerPosition === 0 ? p2StatePda : p1StatePda;
-      const secondStatePda = game.dealerPosition === 0 ? p1StatePda : p2StatePda;
+      // Turn: Check-Check (current_turnから先手を特定)
+      let currentTurn = game.currentTurn as PublicKey;
+      let firstStatePda = currentTurn.equals(player1.publicKey) ? p1StatePda : p2StatePda;
+      let secondKey = currentTurn.equals(player1.publicKey) ? player2.publicKey : player1.publicKey;
+      let secondStatePda = currentTurn.equals(player1.publicKey) ? p2StatePda : p1StatePda;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: firstStatePda, player: firstPlayer.publicKey })
-        .signers([firstPlayer])
+        .accounts({ game: gamePda, playerState: firstStatePda, player: currentTurn, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: secondStatePda, player: secondPlayer.publicKey })
-        .signers([secondPlayer])
+        .accounts({ game: gamePda, playerState: secondStatePda, player: secondKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       // River公開
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .revealCommunityCards(gameIdBn, { river: {} }, Buffer.from([30]))
-        .accounts({ game: gamePda, operator: operator.publicKey })
+        .revealCommunityCards(gameIdBn, { river: {} }, Buffer.from([riverCard]))
+        .accounts({ game: gamePda, player1State: p1StatePda, player2State: p2StatePda, operator: operator.publicKey })
         .signers([operator])
         .rpc();
 
       game = await program.account.game.fetch(gamePda);
       assert.deepEqual(game.phase, { river: {} });
-      assert.equal(game.boardCards[4], 30);
+      assert.equal(game.boardCards[4], riverCard);
     });
 
     it("River: Check-CheckでShowdownに遷移する", async () => {
@@ -732,29 +772,30 @@ describe("claw-poker", () => {
       const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
       const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
 
-      const game = await program.account.game.fetch(gamePda);
-      const firstPlayer = game.dealerPosition === 0 ? player2 : player1;
-      const secondPlayer = game.dealerPosition === 0 ? player1 : player2;
-      const firstStatePda = game.dealerPosition === 0 ? p2StatePda : p1StatePda;
-      const secondStatePda = game.dealerPosition === 0 ? p1StatePda : p2StatePda;
+      // current_turnから先手プレイヤーを特定
+      let game = await program.account.game.fetch(gamePda);
+      const firstKey = game.currentTurn as PublicKey;
+      const secondKey = firstKey.equals(player1.publicKey) ? player2.publicKey : player1.publicKey;
+      const firstStatePda = firstKey.equals(player1.publicKey) ? p1StatePda : p2StatePda;
+      const secondStatePda = firstKey.equals(player1.publicKey) ? p2StatePda : p1StatePda;
 
-      // 1回目Check: was_action_taken=false なのでShowdown未遷移
+      // 1回目Check: street_action_taken=false なのでShowdown未遷移
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: firstStatePda, player: firstPlayer.publicKey })
-        .signers([firstPlayer])
+        .accounts({ game: gamePda, playerState: firstStatePda, player: firstKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       let gameState = await program.account.game.fetch(gamePda);
       assert.deepEqual(gameState.phase, { river: {} }, "1回目のCheckではShowdown未遷移");
 
-      // 2回目Check: was_action_taken=true → Showdown遷移
+      // 2回目Check: street_action_taken=true → Showdown遷移
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameIdBn, { check: {} }, null)
-        .accounts({ game: gamePda, playerState: secondStatePda, player: secondPlayer.publicKey })
-        .signers([secondPlayer])
+        .accounts({ game: gamePda, playerState: secondStatePda, player: secondKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       gameState = await program.account.game.fetch(gamePda);
@@ -810,18 +851,6 @@ describe("claw-poker", () => {
       const [p2StatePda2] = getPlayerStatePda(GAME_ID2, player2.publicKey);
       const [vaultPda2] = getGameVaultPda(GAME_ID2);
       const [poolPda2] = getBettingPoolPda(GAME_ID2);
-      const [queuePda] = getMatchmakingQueuePda();
-
-      // matchmaking_queue に SOL を補充してから game_vault を作成
-      const topUpSig = await provider.connection.requestAirdrop(
-        queuePda,
-        LAMPORTS_PER_SOL / 10
-      );
-      await provider.connection.confirmTransaction({
-        signature: topUpSig,
-        ...(await provider.connection.getLatestBlockhash()),
-      });
-
       // initializeGame(2)
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -855,10 +884,11 @@ describe("claw-poker", () => {
           .accounts({
             game: gamePda2,
             gameVault: vaultPda2,
-            matchmakingQueue: queuePda,
+            operator: operator.publicKey,
             payer: payer.publicKey,
             systemProgram: SystemProgram.programId,
           })
+          .signers([operator])
           .rpc();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -903,7 +933,7 @@ describe("claw-poker", () => {
       }
     });
 
-    it("shuffleAndDeal(2): カードを配布できる", async () => {
+    it("testShuffleAndDeal(2): カードを配布できる", async () => {
       const [gamePda2] = getGamePda(GAME_ID2);
       const [p1StatePda2] = getPlayerStatePda(GAME_ID2, player1.publicKey);
       const [p2StatePda2] = getPlayerStatePda(GAME_ID2, player2.publicKey);
@@ -911,7 +941,7 @@ describe("claw-poker", () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .shuffleAndDeal(gameId2Bn, randomSeed)
+        .testShuffleAndDeal(gameId2Bn, randomSeed)
         .accounts({
           game: gamePda2,
           operator: operator.publicKey,
@@ -930,20 +960,27 @@ describe("claw-poker", () => {
       const [p1StatePda2] = getPlayerStatePda(GAME_ID2, player1.publicKey);
       const [p2StatePda2] = getPlayerStatePda(GAME_ID2, player2.publicKey);
 
-      // P1(SB) AllIn
+      // current_turnを確認してSBプレイヤーからAllIn
+      const gameBefore = await program.account.game.fetch(gamePda2);
+      const sbKey = gameBefore.currentTurn as PublicKey;
+      const bbKey = sbKey.equals(player1.publicKey) ? player2.publicKey : player1.publicKey;
+      const sbStatePda = sbKey.equals(player1.publicKey) ? p1StatePda2 : p2StatePda2;
+      const bbStatePda = sbKey.equals(player1.publicKey) ? p2StatePda2 : p1StatePda2;
+
+      // SB AllIn
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameId2Bn, { allIn: {} }, null)
-        .accounts({ game: gamePda2, playerState: p1StatePda2, player: player1.publicKey })
-        .signers([player1])
+        .accounts({ game: gamePda2, playerState: sbStatePda, player: sbKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
-      // P2(BB) Call (→ auto AllIn)
+      // BB Call (→ auto AllIn)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
         .playerAction(gameId2Bn, { call: {} }, null)
-        .accounts({ game: gamePda2, playerState: p2StatePda2, player: player2.publicKey })
-        .signers([player2])
+        .accounts({ game: gamePda2, playerState: bbStatePda, player: bbKey, operator: operator.publicKey })
+        .signers([operator])
         .rpc();
 
       const game = await program.account.game.fetch(gamePda2);
@@ -1004,24 +1041,36 @@ describe("claw-poker", () => {
 
     it("revealCommunityCards(Flop/Turn/River): AllIn後も全カードを公開できる", async () => {
       const [gamePda2] = getGamePda(GAME_ID2);
+      const [p1StatePda2] = getPlayerStatePda(GAME_ID2, player1.publicKey);
+      const [p2StatePda2] = getPlayerStatePda(GAME_ID2, player2.publicKey);
+
+      // ホールカードと重複しないカードを選ぶ
+      const p1State = await program.account.playerState.fetch(p1StatePda2);
+      const p2State = await program.account.playerState.fetch(p2StatePda2);
+      const usedCards = new Set([
+        p1State.holeCards[0], p1State.holeCards[1],
+        p2State.holeCards[0], p2State.holeCards[1],
+      ]);
+      const available = Array.from({ length: 52 }, (_, i) => i).filter(c => !usedCards.has(c));
+      const [f1, f2, f3, turnCard, riverCard] = available;
 
       for (const [phase, cards] of [
-        [{ flop: {} }, Buffer.from([40, 41, 42])],
-        [{ turn: {} }, Buffer.from([43])],
-        [{ river: {} }, Buffer.from([44])],
+        [{ flop: {} }, Buffer.from([f1, f2, f3])],
+        [{ turn: {} }, Buffer.from([turnCard])],
+        [{ river: {} }, Buffer.from([riverCard])],
       ] as [Record<string, unknown>, Buffer][]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (program.methods as any)
           .revealCommunityCards(gameId2Bn, phase, cards)
-          .accounts({ game: gamePda2, operator: operator.publicKey })
+          .accounts({ game: gamePda2, player1State: p1StatePda2, player2State: p2StatePda2, operator: operator.publicKey })
           .signers([operator])
           .rpc();
       }
 
       const game = await program.account.game.fetch(gamePda2);
       assert.deepEqual(game.phase, { river: {} }, "Riverまでカードがオープンされた");
-      assert.equal(game.boardCards[3], 43, "Turnカードが正しい");
-      assert.equal(game.boardCards[4], 44, "Riverカードが正しい");
+      assert.equal(game.boardCards[3], turnCard, "Turnカードが正しい");
+      assert.equal(game.boardCards[4], riverCard, "Riverカードが正しい");
     });
 
     it("settleHand(AllIn): ポットを分配する（勝者またはTie）", async () => {
@@ -1084,7 +1133,9 @@ describe("claw-poker", () => {
           winner: winnerPublicKey,
           platformTreasury: payer.publicKey,
           bettingPool: poolPda2,
+          operator: operator.publicKey,
         })
+        .signers([operator])
         .rpc();
 
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -1117,7 +1168,9 @@ describe("claw-poker", () => {
             winner: winnerPublicKey,
             platformTreasury: payer.publicKey,
             bettingPool: poolPda2,
+            operator: operator.publicKey,
           })
+          .signers([operator])
           .rpc();
         assert.fail("2回目のresolveGameが通るべきではない");
       } catch (e: unknown) {
@@ -1225,26 +1278,43 @@ describe("claw-poker", () => {
       const GAME_ID = BigInt(1);
       const gameIdBn = new BN(GAME_ID.toString());
       const [gamePda] = getGamePda(GAME_ID);
+      const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
+      const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
 
       // GAME_ID=1 は Suite 6 の settleHand 後に Waiting なので shuffle して PreFlop へ
       const game = await program.account.game.fetch(gamePda);
       if (JSON.stringify(game.phase) === JSON.stringify({ waiting: {} })) {
-        const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
-        const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (program.methods as any)
-          .shuffleAndDeal(gameIdBn, Array.from({ length: 32 }, (_, i) => i + 50))
+          .startNewHand(gameIdBn)
+          .accounts({ game: gamePda, operator: operator.publicKey })
+          .signers([operator])
+          .rpc();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (program.methods as any)
+          .testShuffleAndDeal(gameIdBn, Array.from({ length: 32 }, (_, i) => i + 50))
           .accounts({ game: gamePda, operator: operator.publicKey, player1State: p1StatePda, player2State: p2StatePda })
           .signers([operator])
           .rpc();
       }
 
-      // Flopの3枚に重複(10, 10, 11)を渡す → InvalidAction
+      // ホールカードと重複しないカードを選び、その中で同じカードを2枚指定して重複テスト
+      const p1State = await program.account.playerState.fetch(p1StatePda);
+      const p2State = await program.account.playerState.fetch(p2StatePda);
+      const usedCards = new Set([
+        p1State.holeCards[0], p1State.holeCards[1],
+        p2State.holeCards[0], p2State.holeCards[1],
+      ]);
+      const available = Array.from({ length: 52 }, (_, i) => i).filter(c => !usedCards.has(c));
+      const dupCard = available[0];
+      const otherCard = available[1];
+
+      // Flopの3枚に重複(dupCard, dupCard, otherCard)を渡す → InvalidAction
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (program.methods as any)
-          .revealCommunityCards(gameIdBn, { flop: {} }, Buffer.from([10, 10, 11]))
-          .accounts({ game: gamePda, operator: operator.publicKey })
+          .revealCommunityCards(gameIdBn, { flop: {} }, Buffer.from([dupCard, dupCard, otherCard]))
+          .accounts({ game: gamePda, player1State: p1StatePda, player2State: p2StatePda, operator: operator.publicKey })
           .signers([operator])
           .rpc();
         assert.fail("Flop内の重複カードが通るべきではない");
@@ -1261,24 +1331,36 @@ describe("claw-poker", () => {
       const GAME_ID = BigInt(1);
       const gameIdBn = new BN(GAME_ID.toString());
       const [gamePda] = getGamePda(GAME_ID);
+      const [p1StatePda] = getPlayerStatePda(GAME_ID, player1.publicKey);
+      const [p2StatePda] = getPlayerStatePda(GAME_ID, player2.publicKey);
 
-      // まず有効なFlopを公開してFlopフェーズへ（10, 11, 12 は互いに異なる）
+      // ホールカードと重複しないカードを選ぶ
+      const p1State = await program.account.playerState.fetch(p1StatePda);
+      const p2State = await program.account.playerState.fetch(p2StatePda);
+      const usedCards = new Set([
+        p1State.holeCards[0], p1State.holeCards[1],
+        p2State.holeCards[0], p2State.holeCards[1],
+      ]);
+      const available = Array.from({ length: 52 }, (_, i) => i).filter(c => !usedCards.has(c));
+      const [flopCard1, flopCard2, flopCard3] = available;
+
+      // まず有効なFlopを公開してFlopフェーズへ
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (program.methods as any)
-        .revealCommunityCards(gameIdBn, { flop: {} }, Buffer.from([10, 11, 12]))
-        .accounts({ game: gamePda, operator: operator.publicKey })
+        .revealCommunityCards(gameIdBn, { flop: {} }, Buffer.from([flopCard1, flopCard2, flopCard3]))
+        .accounts({ game: gamePda, player1State: p1StatePda, player2State: p2StatePda, operator: operator.publicKey })
         .signers([operator])
         .rpc();
 
       const gameAfterFlop = await program.account.game.fetch(gamePda);
       assert.deepEqual(gameAfterFlop.phase, { flop: {} }, "Flopフェーズになった");
 
-      // TurnにFlopカードと同じ11を渡す → InvalidAction
+      // TurnにFlopカードと同じカードを渡す → InvalidAction
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (program.methods as any)
-          .revealCommunityCards(gameIdBn, { turn: {} }, Buffer.from([11]))
-          .accounts({ game: gamePda, operator: operator.publicKey })
+          .revealCommunityCards(gameIdBn, { turn: {} }, Buffer.from([flopCard2]))
+          .accounts({ game: gamePda, player1State: p1StatePda, player2State: p2StatePda, operator: operator.publicKey })
           .signers([operator])
           .rpc();
         assert.fail("TurnにFlopと同じカードが通るべきではない");
@@ -1308,7 +1390,7 @@ describe("claw-poker", () => {
         const randomSeed = Array.from({ length: 32 }, (_, i) => i + 77);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (program.methods as any)
-          .shuffleAndDeal(gameIdBn, randomSeed)
+          .testShuffleAndDeal(gameIdBn, randomSeed)
           .accounts({
             game: gamePda,
             operator: operator.publicKey,

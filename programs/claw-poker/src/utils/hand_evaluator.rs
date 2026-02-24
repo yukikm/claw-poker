@@ -81,9 +81,9 @@ pub fn evaluate_five(cards: &[u8; 5]) -> HandValue {
             return HandValue(HandRank::RoyalFlush, ranks_to_array(&ranks));
         }
         // Ace-low ストレートフラッシュ (A-2-3-4-5): Aceは1として扱い 5-highとして評価
-        // 修正前: [12,3,2,1,0] → 6-high SFより誤って高く評価されていた
+        // Straightと同様にトップカードのランクのみで比較する
         if ranks[0] == 12 && ranks[1] == 3 {
-            return HandValue(HandRank::StraightFlush, [3, 2, 1, 0, 0]);
+            return HandValue(HandRank::StraightFlush, [3, 0, 0, 0, 0]);
         }
         return HandValue(HandRank::StraightFlush, ranks_to_array(&ranks));
     }

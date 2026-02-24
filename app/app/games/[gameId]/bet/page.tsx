@@ -71,7 +71,7 @@ export default function BetPage({ params }: PageProps) {
       </div>
 
       {isLoading ? (
-        <div className="glass rounded-xl p-8 text-center text-slate-500">読み込み中...</div>
+        <div className="glass rounded-xl p-8 text-center text-slate-500 animate-pulse" role="status" aria-label="読み込み中">読み込み中...</div>
       ) : game ? (
         <BettingPanel
           gameId={gameId}

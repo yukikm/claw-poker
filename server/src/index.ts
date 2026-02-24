@@ -8,7 +8,7 @@ import { GameMonitor, DecodedGameState } from './gameMonitor';
 import { AnchorClient, ActionType } from './anchorClient';
 import { SignatureStore } from './signatureStore';
 import { createX402Router } from './x402Handler';
-import { QueueJoinedMessage, GameJoinedMessage, ServerMessage, OpponentActionMessage, CommunityCardsRevealedMessage, HandCompleteMessage } from './types';
+import { QueueJoinedMessage, GameJoinedMessage, ServerMessage, OpponentActionMessage, CommunityCardsRevealedMessage, HandCompleteMessage, HandHistoryEntry } from './types';
 
 config();
 
@@ -45,6 +45,9 @@ const actionTimeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** gameId(string) → 前回のDecodedGameState（フェーズ変化検知・アクション通知用） */
 const prevGameStates = new Map<string, DecodedGameState>();
+
+/** 現在のハンド内のアクション履歴（gameId → アクション配列） */
+const currentHandActions = new Map<string, HandHistoryEntry[]>();
 
 const matchmakingQueue: QueueEntry[] = [];
 
@@ -189,6 +192,16 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
     const playerPubkey = new PublicKey(walletAddress);
     await anchorClient.submitPlayerAction(gameId, playerPubkey, action as ActionType, amount);
 
+    // ハンドアクション履歴を記録
+    const activeGameForHistory = activeGames.get(gameId);
+    if (activeGameForHistory) {
+      const playerPosition: 'player1' | 'player2' =
+        activeGameForHistory.player1Wallet === walletAddress ? 'player1' : 'player2';
+      const actions = currentHandActions.get(gameIdStr) ?? [];
+      actions.push({ player: playerPosition, action, amount: amount ?? undefined });
+      currentHandActions.set(gameIdStr, actions);
+    }
+
     // prevGameStatesから現在の状態を取得（直前のGameMonitor更新値）
     const prevState = prevGameStates.get(gameIdStr);
     const isP1 = activeGames.get(gameId)?.player1Wallet === walletAddress;
@@ -207,13 +220,17 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       const opponentWallet = activeGameForAction.player1Wallet === walletAddress
         ? activeGameForAction.player2Wallet
         : activeGameForAction.player1Wallet;
+      const prevStateForOpp = prevGameStates.get(gameIdStr);
+      const isActingP1 = activeGameForAction.player1Wallet === walletAddress;
       const oppMsg: OpponentActionMessage = {
         type: 'opponent_action',
         gameId: gameIdStr,
         action,
         amount: amount ?? null,
-        newPot: 0,
-        opponentStack: 0,
+        newPot: prevStateForOpp?.pot ?? 0,
+        opponentStack: prevStateForOpp
+          ? (isActingP1 ? prevStateForOpp.player1ChipStack : prevStateForOpp.player2ChipStack)
+          : 0,
       };
       agentHandler.sendToAgent(opponentWallet, oppMsg);
     }
@@ -392,8 +409,23 @@ async function onGameStateUpdate(
     }
   }
 
+  // 50ハンドチェックポイント自動コミット
+  // settle_handでlast_checkpoint_handが更新された（値が変化した）タイミングでcommit_gameを呼び出す
+  if (
+    prevState &&
+    state.lastCheckpointHand > prevState.lastCheckpointHand &&
+    state.phase === 'Waiting'
+  ) {
+    console.log(`[Checkpoint] Game ${gameIdStr}: hand ${state.handNumber}, checkpoint at ${state.lastCheckpointHand}`);
+    anchorClient.commitGameCheckpoint(gameId).catch((err) => {
+      console.error(`[Checkpoint] Failed to commit checkpoint for game ${gameIdStr}:`, err);
+    });
+  }
+
   // ハンド完了通知（hand_number が増加した時）
   if (prevState && state.handNumber > prevState.handNumber) {
+    // 完了したハンドのアクション履歴をクリア
+    currentHandActions.delete(gameIdStr);
     const prevP1Folded = prevState.player1HasFolded ?? false;
     const prevP2Folded = prevState.player2HasFolded ?? false;
     let handWinner: 'player1' | 'player2' = 'player1';
@@ -470,7 +502,7 @@ async function onGameStateUpdate(
       maxRaise: myStack,
       timeoutSeconds: 30,
       dealerPosition: state.dealerPosition === 0 ? 'player1' : 'player2',
-      handHistory: [],
+      handHistory: currentHandActions.get(gameIdStr) ?? [],
     });
   }
 
@@ -554,8 +586,7 @@ async function handleGameComplete(
     const result = await anchorClient.resolveGame(gameId, winnerPubkey);
     payoutAmount = result.payout;
     payoutSignature = result.signature;
-    // fee = pot * 2% = (buyIn * 2) * 2 / 100
-    houseFee = Math.floor((payoutAmount * 2) / 98); // reverse: payout = pot - fee, fee = pot*2/100
+    houseFee = result.fee;
   } catch (err) {
     console.error(`[GameComplete] Failed to resolve game ${gameIdStr}:`, err);
   }
@@ -590,6 +621,7 @@ async function handleGameComplete(
     anchorClient.getERConnection(),
   );
   prevGameStates.delete(gameIdStr);
+  currentHandActions.delete(gameIdStr);
   activeGames.delete(gameId);
 }
 

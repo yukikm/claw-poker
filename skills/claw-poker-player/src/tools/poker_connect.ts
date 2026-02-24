@@ -3,12 +3,16 @@ import nacl from 'tweetnacl';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { getConnectionState } from '../connectionState';
+import type { OpenClawPluginApi } from '../types';
 
 const SIGN_PREFIX = 'Claw Poker Authentication\nNonce: ';
 const DEFAULT_SERVER_URL = 'wss://poker.clawgames.xyz/ws';
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const PONG_TIMEOUT_MS = 5_000;
 const MAX_RECONNECT_ATTEMPTS = 10;
+const INITIAL_RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const RECONNECT_BACKOFF_FACTOR = 2;
 
 interface ConnectResult {
   success: boolean;
@@ -18,7 +22,96 @@ interface ConnectResult {
   message: string;
 }
 
-export function registerPokerConnect(api: { registerTool: (tool: unknown) => void }): void {
+function connectToServer(
+  state: ReturnType<typeof getConnectionState>,
+  keypair: Keypair,
+  serverUrl: string,
+  isReconnect?: boolean,
+): Promise<ConnectResult> {
+  // Close existing connection if any
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.close();
+  }
+
+  return new Promise<ConnectResult>((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve({
+        success: false,
+        message: 'SERVER_UNAVAILABLE: 接続がタイムアウトしました',
+      });
+    }, 10_000);
+
+    try {
+      const ws = new WebSocket(serverUrl);
+      state.ws = ws;
+
+      ws.on('open', () => {
+        state.connected = true;
+        if (isReconnect) {
+          console.log('[poker_connect] Reconnected to server');
+        }
+      });
+
+      ws.on('message', (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          handleServerMessage(message, state, keypair, serverUrl, resolve, timeout);
+        } catch {
+          // Ignore malformed messages
+        }
+      });
+
+      ws.on('close', () => {
+        state.connected = false;
+        state.authenticated = false;
+        // ゲーム中または認証済みの場合、再接続を試みる
+        if (state.serverUrl && state.keypair && state.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          scheduleReconnect(state);
+        }
+      });
+
+      ws.on('error', () => {
+        clearTimeout(timeout);
+        state.connected = false;
+        if (!isReconnect) {
+          resolve({
+            success: false,
+            message: 'CONNECTION_FAILED: WebSocket接続に失敗しました',
+          });
+        }
+      });
+    } catch {
+      clearTimeout(timeout);
+      if (!isReconnect) {
+        resolve({
+          success: false,
+          message: 'CONNECTION_FAILED: WebSocket接続に失敗しました',
+        });
+      }
+    }
+  });
+}
+
+function scheduleReconnect(state: ReturnType<typeof getConnectionState>): void {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+  }
+  const delay = Math.min(
+    INITIAL_RECONNECT_DELAY_MS * Math.pow(RECONNECT_BACKOFF_FACTOR, state.reconnectAttempts),
+    MAX_RECONNECT_DELAY_MS,
+  );
+  const jitter = Math.random() * 500;
+  console.log(`[poker_connect] Reconnecting in ${Math.round(delay + jitter)}ms (attempt ${state.reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectAttempts += 1;
+    state.reconnectTimer = null;
+    if (state.serverUrl && state.keypair) {
+      connectToServer(state, state.keypair, state.serverUrl, true);
+    }
+  }, delay + jitter);
+}
+
+export function registerPokerConnect(api: OpenClawPluginApi): void {
   api.registerTool({
     name: 'poker_connect',
     description:
@@ -33,7 +126,8 @@ export function registerPokerConnect(api: { registerTool: (tool: unknown) => voi
       },
       required: [],
     },
-    execute: async (params: { serverUrl?: string }): Promise<ConnectResult> => {
+    execute: async (params: Record<string, unknown>): Promise<ConnectResult> => {
+      const serverUrl = params['serverUrl'] as string | undefined;
       const state = getConnectionState();
 
       // Check wallet key
@@ -56,59 +150,9 @@ export function registerPokerConnect(api: { registerTool: (tool: unknown) => voi
         };
       }
 
-      const serverUrl = params.serverUrl ?? process.env.CLAW_POKER_SERVER_URL ?? DEFAULT_SERVER_URL;
+      const resolvedServerUrl = serverUrl ?? process.env.CLAW_POKER_SERVER_URL ?? DEFAULT_SERVER_URL;
 
-      // Close existing connection if any
-      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.close();
-      }
-
-      return new Promise<ConnectResult>((resolve) => {
-        const timeout = setTimeout(() => {
-          resolve({
-            success: false,
-            message: 'SERVER_UNAVAILABLE: 接続がタイムアウトしました',
-          });
-        }, 10_000);
-
-        try {
-          const ws = new WebSocket(serverUrl);
-          state.ws = ws;
-
-          ws.on('open', () => {
-            state.connected = true;
-          });
-
-          ws.on('message', (data) => {
-            try {
-              const message = JSON.parse(data.toString());
-              handleServerMessage(message, state, keypair, resolve, timeout);
-            } catch {
-              // Ignore malformed messages
-            }
-          });
-
-          ws.on('close', () => {
-            state.connected = false;
-            state.authenticated = false;
-          });
-
-          ws.on('error', () => {
-            clearTimeout(timeout);
-            state.connected = false;
-            resolve({
-              success: false,
-              message: 'CONNECTION_FAILED: WebSocket接続に失敗しました',
-            });
-          });
-        } catch {
-          clearTimeout(timeout);
-          resolve({
-            success: false,
-            message: 'CONNECTION_FAILED: WebSocket接続に失敗しました',
-          });
-        }
-      });
+      return connectToServer(state, keypair, resolvedServerUrl);
     },
   });
 }
@@ -117,6 +161,7 @@ function handleServerMessage(
   message: Record<string, unknown>,
   state: ReturnType<typeof getConnectionState>,
   keypair: Keypair,
+  serverUrl: string,
   resolve: (result: ConnectResult) => void,
   timeout: ReturnType<typeof setTimeout>,
 ): void {
@@ -144,6 +189,9 @@ function handleServerMessage(
       state.authenticated = true;
       state.token = message.token as string;
       state.walletAddress = keypair.publicKey.toBase58();
+      state.reconnectAttempts = 0;
+      state.serverUrl = serverUrl;
+      state.keypair = keypair;
 
       // Start heartbeat
       startHeartbeat(state);
@@ -178,9 +226,30 @@ function startHeartbeat(state: ReturnType<typeof getConnectionState>): void {
     clearInterval(state.heartbeatTimer);
   }
 
+  let pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // pong受信ハンドラ（重複登録を避けるため一度だけ設定）
+  const pongHandler = (data: Buffer | string): void => {
+    try {
+      const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+      if (msg.type === 'pong') {
+        if (pongTimeoutTimer) {
+          clearTimeout(pongTimeoutTimer);
+          pongTimeoutTimer = null;
+        }
+      }
+    } catch { /* ignore */ }
+  };
+  state.ws?.on('message', pongHandler);
+
   state.heartbeatTimer = setInterval(() => {
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+      // PONG_TIMEOUT_MS以内にpongが返らなければ接続を切断して再接続
+      pongTimeoutTimer = setTimeout(() => {
+        console.warn('[poker_connect] Pong timeout, closing connection for reconnect');
+        state.ws?.close();
+      }, PONG_TIMEOUT_MS);
     }
   }, HEARTBEAT_INTERVAL_MS);
 }

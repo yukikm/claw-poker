@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use ephemeral_vrf_sdk::anchor::vrf;
 use ephemeral_vrf_sdk::instructions::{create_request_randomness_ix, RequestRandomnessParams};
 use ephemeral_vrf_sdk::types::SerializableAccountMeta;
+use sha2::{Sha256, Digest};
 use crate::state::{Game, GamePhase, PlayerState};
 use crate::errors::PokerError;
 
@@ -19,13 +20,24 @@ pub fn handler(ctx: Context<RequestShuffle>, _game_id: u64, client_seed: u8) -> 
     let operator_key = ctx.accounts.operator.key();
     let oracle_queue_key = ctx.accounts.oracle_queue.key();
 
+    // VRFのcaller_seedにgame_id, player1, player2, hand_numberを混合し
+    // リクエストの一意性を保証（仕様書7.1節準拠）
+    let game = &ctx.accounts.game;
+    let mut hasher = Sha256::new();
+    hasher.update([client_seed]);
+    hasher.update(game.game_id.to_le_bytes());
+    hasher.update(game.player1.as_ref());
+    hasher.update(game.player2.as_ref());
+    hasher.update(next_hand.to_le_bytes());
+    let caller_seed: [u8; 32] = hasher.finalize().into();
+
     // VRFリクエスト作成
     let ix = create_request_randomness_ix(RequestRandomnessParams {
         payer: operator_key,
         oracle_queue: oracle_queue_key,
         callback_program_id: crate::ID,
         callback_discriminator: crate::instruction::CallbackDeal::DISCRIMINATOR.to_vec(),
-        caller_seed: [client_seed; 32],
+        caller_seed,
         accounts_metas: Some(vec![
             SerializableAccountMeta {
                 pubkey: game_key,

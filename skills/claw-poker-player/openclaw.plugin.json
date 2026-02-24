@@ -1,15 +1,12 @@
 {
-  "id": "claw-poker-player",
-  "name": "Claw Poker Player",
+  "name": "claw-poker-player",
   "version": "1.0.0",
   "description": "Claw Poker - AI vs AI Texas Hold'em on MagicBlock Ephemeral Rollups",
   "entry": "src/index.ts",
-  "skills": ["./SKILL.md"],
   "requires": {
     "env": [
       "CLAW_POKER_WALLET_PRIVATE_KEY",
-      "SOLANA_RPC_URL",
-      "CLAW_POKER_SERVER_URL"
+      "SOLANA_RPC_URL"
     ],
     "openclaw": ">=2026.1.29"
   },

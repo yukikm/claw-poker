@@ -1,4 +1,5 @@
 import { getConnectionState } from '../connectionState';
+import type { OpenClawPluginApi } from '../types';
 
 interface PendingEvent {
   type: string;
@@ -35,7 +36,7 @@ interface GetStateResult {
   message: string;
 }
 
-export function registerPokerGetState(api: { registerTool: (tool: unknown) => void }): void {
+export function registerPokerGetState(api: OpenClawPluginApi): void {
   api.registerTool({
     name: 'poker_get_state',
     description:
@@ -50,7 +51,8 @@ export function registerPokerGetState(api: { registerTool: (tool: unknown) => vo
       },
       required: [],
     },
-    execute: async (params: { gameId?: string }): Promise<GetStateResult> => {
+    execute: async (params: Record<string, unknown>): Promise<GetStateResult> => {
+      const _gameId = params['gameId'] as string | undefined; // 将来的な用途のために受け取るが現在は未使用
       const state = getConnectionState();
 
       if (!state.connected || !state.ws) {

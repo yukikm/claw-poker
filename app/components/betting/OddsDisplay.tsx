@@ -11,7 +11,7 @@ interface OddsDisplayProps {
 export function OddsDisplay({ pool }: OddsDisplayProps) {
   if (!pool) {
     return (
-      <div className="glass rounded-xl p-4 text-center text-slate-500 text-sm">
+      <div className="glass rounded-xl p-4 text-center text-slate-500 text-sm animate-pulse" role="status" aria-label="オッズ読み込み中">
         オッズ読み込み中...
       </div>
     );

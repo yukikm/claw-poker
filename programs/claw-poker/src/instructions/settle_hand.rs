@@ -159,10 +159,18 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
         game.winner = Some(game.player1);
     }
 
-    // ゲーム終了判定: MAX_HAND_NUMBER到達（チップリードが勝者、同点は追加ハンド継続）
+    // ゲーム終了判定: MAX_HAND_NUMBER (200) 到達時のタイブレーク規則
+    //
+    // 1. チップ差がある場合 → チップリードが多い方が勝者
+    // 2. 同チップの場合 → MAX_TIE_EXTENSION_HANDS (20) ハンドまで延長戦を継続
+    // 3. 延長戦 (220ハンド) 到達後も同チップの場合 → 決定論的タイブレーク:
+    //    Player1（game.player1 = 先にゲームに参加したプレイヤー）を勝者とする。
+    //    これはブロックチェーン上で決定論的な結果を保証するためのフォールバックであり、
+    //    高ブラインド（SB=50/BB=100）の延長戦では理論上ほぼ発生しないケースである。
+    //    See: docs/GAME_SPECIFICATION.md Section 2.3
     if game.phase != GamePhase::Finished && game.hand_number >= MAX_HAND_NUMBER {
         if p1_state.chip_stack != p2_state.chip_stack {
-            // チップ差がある場合のみFinished
+            // チップ差がある場合: チップリードが多い方が勝者
             game.phase = GamePhase::Finished;
             if p1_state.chip_stack > p2_state.chip_stack {
                 game.winner = Some(game.player1);
@@ -170,14 +178,14 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
                 game.winner = Some(game.player2);
             }
         }
-        // 同点の場合: MAX_TIE_EXTENSION_HANDS まで追加ハンドを継続
-        // 上限に達してもまだ同点の場合はPlayer1を勝者とする（実際上は発生しない）
+        // 同チップの場合: MAX_TIE_EXTENSION_HANDS まで追加ハンドを継続
+        // 延長上限 (MAX_HAND_NUMBER + MAX_TIE_EXTENSION_HANDS = 220) に到達した場合、
+        // チップリードがある方を勝者とし、それでも同チップならPlayer1を勝者とする
+        // （決定論的タイブレーク: ブロックチェーン上で曖昧さのない結果を保証する）
         if game.phase != GamePhase::Finished
             && game.hand_number >= MAX_HAND_NUMBER.saturating_add(MAX_TIE_EXTENSION_HANDS)
         {
             game.phase = GamePhase::Finished;
-            // ブラインドが高い後半戦でここに到達することはほぼないが、
-            // チップリードがある方を勝者とし、同数ならPlayer1を勝者とする
             game.winner = Some(if p1_state.chip_stack >= p2_state.chip_stack {
                 game.player1
             } else {

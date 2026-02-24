@@ -451,6 +451,64 @@ export class AnchorClient {
     console.log(`[AnchorClient] Player ${playerPubkey.toBase58()} entered queue, fee: ${entryFeeLamports} lamports`);
   }
 
+  // ─── チェックポイントコミット ──────────────────────────────────────────────
+
+  /**
+   * 50ハンドチェックポイントでER上の状態をL1にコミットする。
+   * commit_game命令をphase==Waitingの状態で呼び出す（中間チェックポイント）。
+   */
+  async commitGameCheckpoint(gameId: bigint): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    // ER上のGameアカウントからplayer1/player2を読み取る
+    const gameAccount = await this.erConnection.getAccountInfo(gamePda, 'confirmed');
+    if (!gameAccount) {
+      throw new Error(`Game account not found for gameId ${gameId}`);
+    }
+
+    // player1: offset 8 (discriminator) + 8 (game_id) + 32 (operator) + 32 (platform_treasury) = 80
+    const player1 = new PublicKey(gameAccount.data.subarray(80, 112));
+    const player2 = new PublicKey(gameAccount.data.subarray(112, 144));
+
+    const [player1StatePda] = this.derivePlayerStatePda(gameId, player1);
+    const [player2StatePda] = this.derivePlayerStatePda(gameId, player2);
+
+    // Permission PDA導出
+    const PERMISSION_PROG = new PublicKey('PERMwfoGhaxc4V7SREhGEJrHjfMKMWBi9zfqRiAhmkd');
+    const [permissionP1] = PublicKey.findProgramAddressSync(
+      [Buffer.from('permission'), player1StatePda.toBuffer()], PERMISSION_PROG,
+    );
+    const [permissionP2] = PublicKey.findProgramAddressSync(
+      [Buffer.from('permission'), player2StatePda.toBuffer()], PERMISSION_PROG,
+    );
+    const [permissionGame] = PublicKey.findProgramAddressSync(
+      [Buffer.from('permission'), gamePda.toBuffer()], PERMISSION_PROG,
+    );
+
+    const txSig = await (this.erProgram.methods as unknown as {
+      commitGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .commitGame(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        operator: operatorPubkey,
+        game: gamePda,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
+        permissionP1: permissionP1,
+        permissionP2: permissionP2,
+        permissionGame: permissionGame,
+        permissionProgram: PERMISSION_PROG,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Checkpoint commit for game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
   // ─── TEE認証 ────────────────────────────────────────────────────────────
 
   /** TEE認証トークンの有効期限バッファ（5分前に再取得） */
@@ -578,7 +636,7 @@ export class AnchorClient {
   async resolveGame(
     gameId: bigint,
     winnerPubkey: PublicKey,
-  ): Promise<{ payout: number; signature: string }> {
+  ): Promise<{ payout: number; fee: number; signature: string }> {
     const [gamePda] = this.deriveGamePda(gameId);
     const [vaultPda] = this.deriveVaultPda(gameId);
     const [bettingPoolPda] = this.deriveBettingPoolPda(gameId);
@@ -603,16 +661,22 @@ export class AnchorClient {
     // Gameアカウントからbuy_inを読み取ってpayout計算（pot = buyIn * 2, fee = 2%, payout = pot - fee）
     const gameAccount = await this.l1Connection.getAccountInfo(gamePda, 'confirmed');
     let payout = 0;
+    let fee = 0;
     if (gameAccount) {
-      // buy_in offset: 8 (discriminator) + 8 (game_id) + 32 (operator) + 32 (platform_treasury) + 32 (player1) + 32 (player2) = 144
-      const buyIn = Number(gameAccount.data.readBigUInt64LE(144));
+      // M-x402-2: IDLのcoder.accounts.decodeで動的にデコードし、バイナリオフセットのハードコードを排除
+      const decoded = this.l1Program.coder.accounts.decode('Game', gameAccount.data) as {
+        buyIn: { toNumber?: () => number; toString: () => string };
+      };
+      const buyIn = typeof decoded.buyIn.toNumber === 'function'
+        ? decoded.buyIn.toNumber()
+        : Number(decoded.buyIn.toString());
       const pot = buyIn * 2;
-      const fee = Math.floor((pot * 2) / 100);
+      fee = Math.floor((pot * 2) / 100);
       payout = pot - fee;
     }
 
-    console.log(`[AnchorClient] Game ${gameId} resolved. Winner: ${winnerPubkey.toBase58()}, payout: ${payout}, tx: ${txSig}`);
-    return { payout, signature: txSig };
+    console.log(`[AnchorClient] Game ${gameId} resolved. Winner: ${winnerPubkey.toBase58()}, payout: ${payout}, fee: ${fee}, tx: ${txSig}`);
+    return { payout, fee, signature: txSig };
   }
 
   // ─── ゲーム一覧取得（IDL使用） ─────────────────────────────────────────────

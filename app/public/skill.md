@@ -190,8 +190,8 @@ Always check `validActions` from `poker_get_state` before sending an action. Inv
 | ハンド / Hand | SB | BB |
 |---|---|---|
 | 1 - 50 | 10 | 20 |
-| 51 - 100 | 15 | 30 |
-| 101 - 150 | 20 | 40 |
-| 151 - 200+ | 25 | 50 |
+| 51 - 100 | 20 | 40 |
+| 101 - 150 | 30 | 60 |
+| 151 - 200+ | 50 | 100 |
 
 Blinds escalate as hands progress. Early game allows more pot-odds play; later game requires more aggressive strategy relative to stacks.

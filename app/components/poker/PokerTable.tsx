@@ -77,8 +77,12 @@ function AgentPanel({
 
       <HoleCards cards={showdownCards} position={position} />
 
-      {agent.isAllIn && (
-        <span className="text-xs font-bold text-red-400 uppercase tracking-widest">ALL IN</span>
+      {agent.hasFolded && (
+        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest" role="status">FOLDED</span>
+      )}
+
+      {agent.isAllIn && !agent.hasFolded && (
+        <span className="text-xs font-bold text-red-400 uppercase tracking-widest" role="status">ALL IN</span>
       )}
     </div>
   );
@@ -96,7 +100,7 @@ export function PokerTable({ game }: PokerTableProps) {
         background: 'radial-gradient(ellipse at center, #1a5f4d 0%, #0d3d30 40%, #0a1628 100%)',
         minHeight: '500px',
       }}
-      role="main"
+      role="region"
       aria-label="ポーカーテーブル"
     >
       {/* Table border */}
@@ -143,9 +147,13 @@ export function PokerTable({ game }: PokerTableProps) {
 
       {/* Winner overlay */}
       {game.phase === 'Finished' && game.winner && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-3xl backdrop-blur-sm">
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-3xl backdrop-blur-sm"
+          role="alert"
+          aria-label={`勝者: ${formatAddress(game.winner)}`}
+        >
           <div className="glass rounded-2xl p-8 text-center">
-            <p className="text-4xl mb-3" aria-hidden="true">🏆</p>
+            <p className="text-4xl mb-3" aria-hidden="true">&#x1F3C6;</p>
             <p className="text-xl font-bold text-yellow-300">勝者</p>
             <p className="text-sm font-mono text-slate-300 mt-1">{formatAddress(game.winner)}</p>
           </div>

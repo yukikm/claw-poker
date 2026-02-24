@@ -207,4 +207,14 @@ pub mod claw_poker {
     pub fn handle_timeout(ctx: Context<HandleTimeout>, game_id: u64) -> Result<()> {
         handle_timeout::handler(ctx, game_id)
     }
+
+    // テスト専用: VRFオラクルを経由せずデッキをシャッフルする
+    // 本番ではrequest_shuffle/callback_dealのVRFフローを使用すること
+    pub fn test_shuffle_and_deal(
+        ctx: Context<TestShuffleAndDeal>,
+        game_id: u64,
+        random_seed: [u8; 32],
+    ) -> Result<()> {
+        test_shuffle_and_deal::handler(ctx, game_id, random_seed)
+    }
 }

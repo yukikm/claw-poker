@@ -7,21 +7,21 @@ use crate::state::{Game, GamePhase, PlayerState};
 use crate::errors::PokerError;
 
 pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
-    let game = &ctx.accounts.game;
+    // phaseとwinnerをコピーしてimmutable borrowを終了させる
+    let phase = ctx.accounts.game.phase.clone();
+    let winner = ctx.accounts.game.winner;
 
-    if game.phase == GamePhase::Finished {
-        // ゲーム終了: 最終状態をL1にコミットしてER委譲を解除
-        require!(game.winner.is_some(), PokerError::GameNotFound);
+    if phase == GamePhase::Finished {
+        require!(winner.is_some(), PokerError::GameNotFound);
 
         // ホールカードをクリア（プライバシー保護: L1への露出防止）
-        // account_infos を作成する前にミュータブル借用を終了させる
         ctx.accounts.player1_state.hole_cards = [255u8; 2];
         ctx.accounts.player2_state.hole_cards = [255u8; 2];
         // showdownカードもクリア（L1への露出防止）
         ctx.accounts.game.showdown_cards_p1 = [255u8; 2];
         ctx.accounts.game.showdown_cards_p2 = [255u8; 2];
 
-        // ホールカードクリア後にイミュータブル借用を取得
+        // mutable変更後にimmutable借用
         let account_infos = vec![
             ctx.accounts.game.as_ref(),
             ctx.accounts.player1_state.as_ref(),
@@ -35,65 +35,72 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
             &ctx.accounts.magic_program,
         )?;
 
-        // Player1/Player2のPermission PDAもundelegate
+        // Permission undelegateに必要な値をコピー
         let p1_state_info = ctx.accounts.player1_state.to_account_info();
-        let p1_bump = ctx.accounts.player1_state.bump;
-        let p1_key = game.player1;
-        let game_id_bytes = game.game_id.to_le_bytes();
-
-        let p1_seeds: &[&[u8]] = &[
-            b"player_state",
-            game_id_bytes.as_ref(),
-            p1_key.as_ref(),
-            &[p1_bump],
-        ];
-
-        CommitAndUndelegatePermissionCpiBuilder::new(&ctx.accounts.permission_program)
-            .authority(&p1_state_info, true)
-            .permissioned_account(&p1_state_info, true)
-            .permission(&ctx.accounts.permission_p1)
-            .magic_program(&ctx.accounts.magic_program)
-            .magic_context(&ctx.accounts.magic_context)
-            .invoke_signed(&[p1_seeds])?;
-
         let p2_state_info = ctx.accounts.player2_state.to_account_info();
-        let p2_bump = ctx.accounts.player2_state.bump;
-        let p2_key = game.player2;
-
-        let p2_seeds: &[&[u8]] = &[
-            b"player_state",
-            game_id_bytes.as_ref(),
-            p2_key.as_ref(),
-            &[p2_bump],
-        ];
-
-        CommitAndUndelegatePermissionCpiBuilder::new(&ctx.accounts.permission_program)
-            .authority(&p2_state_info, true)
-            .permissioned_account(&p2_state_info, true)
-            .permission(&ctx.accounts.permission_p2)
-            .magic_program(&ctx.accounts.magic_program)
-            .magic_context(&ctx.accounts.magic_context)
-            .invoke_signed(&[p2_seeds])?;
-
-        // Game PermissionのPDAもundelegate
         let game_info = ctx.accounts.game.to_account_info();
-        let game_seeds: &[&[u8]] = &[
-            b"game",
-            game_id_bytes.as_ref(),
-            &[game.bump],
-        ];
+        let game_id_bytes = ctx.accounts.game.game_id.to_le_bytes();
+        let p1_key = ctx.accounts.game.player1;
+        let p2_key = ctx.accounts.game.player2;
+        let game_bump = ctx.accounts.game.bump;
+        let p1_bump = ctx.accounts.player1_state.bump;
+        let p2_bump = ctx.accounts.player2_state.bump;
 
-        CommitAndUndelegatePermissionCpiBuilder::new(&ctx.accounts.permission_program)
-            .authority(&ctx.accounts.payer.to_account_info(), false)
-            .permissioned_account(&game_info, true)
-            .permission(&ctx.accounts.permission_game)
-            .magic_program(&ctx.accounts.magic_program)
-            .magic_context(&ctx.accounts.magic_context)
-            .invoke_signed(&[game_seeds])?;
+        // P1 Permission undelegate
+        {
+            let p1_bump_arr = [p1_bump];
+            let p1_seeds: &[&[u8]] = &[
+                b"player_state",
+                &game_id_bytes,
+                p1_key.as_ref(),
+                &p1_bump_arr,
+            ];
+            CommitAndUndelegatePermissionCpiBuilder::new(&ctx.accounts.permission_program)
+                .authority(&p1_state_info, true)
+                .permissioned_account(&p1_state_info, true)
+                .permission(&ctx.accounts.permission_p1)
+                .magic_program(&ctx.accounts.magic_program)
+                .magic_context(&ctx.accounts.magic_context)
+                .invoke_signed(&[p1_seeds])?;
+        }
+
+        // P2 Permission undelegate
+        {
+            let p2_bump_arr = [p2_bump];
+            let p2_seeds: &[&[u8]] = &[
+                b"player_state",
+                &game_id_bytes,
+                p2_key.as_ref(),
+                &p2_bump_arr,
+            ];
+            CommitAndUndelegatePermissionCpiBuilder::new(&ctx.accounts.permission_program)
+                .authority(&p2_state_info, true)
+                .permissioned_account(&p2_state_info, true)
+                .permission(&ctx.accounts.permission_p2)
+                .magic_program(&ctx.accounts.magic_program)
+                .magic_context(&ctx.accounts.magic_context)
+                .invoke_signed(&[p2_seeds])?;
+        }
+
+        // Game Permission undelegate
+        {
+            let game_bump_arr = [game_bump];
+            let game_seeds: &[&[u8]] = &[
+                b"game",
+                &game_id_bytes,
+                &game_bump_arr,
+            ];
+            CommitAndUndelegatePermissionCpiBuilder::new(&ctx.accounts.permission_program)
+                .authority(&ctx.accounts.payer.to_account_info(), false)
+                .permissioned_account(&game_info, true)
+                .permission(&ctx.accounts.permission_game)
+                .magic_program(&ctx.accounts.magic_program)
+                .magic_context(&ctx.accounts.magic_context)
+                .invoke_signed(&[game_seeds])?;
+        }
     } else {
-        // 中間チェックポイント（50ハンドごと）: ハンドが進行中でないことを確認
         require!(
-            game.phase == GamePhase::Waiting,
+            phase == GamePhase::Waiting,
             PokerError::InvalidAction
         );
         let account_infos = vec![

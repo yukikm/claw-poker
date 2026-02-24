@@ -1,5 +1,5 @@
 import express from 'express';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SendTransactionError, TransactionExpiredBlockheightExceededError } from '@solana/web3.js';
 import { AnchorClient } from './anchorClient';
 
 const DEFAULT_ENTRY_FEE_SOL = 0.1;
@@ -30,13 +30,7 @@ export function createX402Router(
   let middlewareApplied = false;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { paymentMiddleware } = require('x402-express') as {
-      paymentMiddleware: (
-        recipient: string,
-        routes: Record<string, { price: string; network: string; config?: Record<string, string> }>,
-        options?: { facilitator?: unknown },
-      ) => express.RequestHandler;
-    };
+    const { paymentMiddleware } = require('x402-express');
 
     // x402の受取先はオペレーターウォレットを指定する。
     // PDA（matchmakingQueue）は署名可能なウォレットではないため、x402の受取先には使えない。
@@ -45,12 +39,10 @@ export function createX402Router(
     const recipient = anchorClient.getOperatorPublicKey().toString();
 
     // Coinbase CDP facilitator設定（環境変数から読み込み）
-    let facilitatorConfig: unknown;
+    let facilitatorConfig: import('@coinbase/x402').FacilitatorConfig | undefined;
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createFacilitatorConfig } = require('@coinbase/x402') as {
-        createFacilitatorConfig: (opts: { apiKeyId?: string; apiKeySecret?: string }) => unknown;
-      };
+      const { createFacilitatorConfig } = require('@coinbase/x402');
       facilitatorConfig = createFacilitatorConfig({
         apiKeyId: process.env.CDP_API_KEY_ID,
         apiKeySecret: process.env.CDP_API_KEY_SECRET,
@@ -59,6 +51,12 @@ export function createX402Router(
       console.warn('⚠️  @coinbase/x402 not installed, using default facilitator');
     }
 
+    // M-x402-1: SignatureStore（リプレイ攻撃防止）について
+    // x402-expressのpaymentMiddlewareは、signatureStoreオプション未指定時に
+    // デフォルトでインメモリSignatureStoreを使用する。
+    // これにより同一署名の再利用（リプレイ攻撃）は単一プロセス内で防止される。
+    // 注意: サーバー再起動やマルチインスタンス構成ではインメモリストアがリセットされるため、
+    // 本番環境ではRedis等の永続SignatureStoreへの切り替えを検討すること。
     router.use(
       paymentMiddleware(
         recipient,
@@ -125,18 +123,38 @@ export function createX402Router(
     } catch (err) {
       console.error('[x402] enterMatchmakingQueue failed:', err);
 
-      // C-2: キュー登録失敗時、x402で受け取ったSOLをプレイヤーに返金する
-      try {
-        await anchorClient.refundEntryFee(playerPubkey, entryFeeLamports);
-        console.log(`[x402] Entry fee refunded to ${walletAddress}: ${entryFeeLamports} lamports`);
-      } catch (refundErr) {
-        console.error('[x402] CRITICAL: Refund failed for', walletAddress, ':', refundErr);
-      }
+      // C-x402-2: エラー種別を区別し、「送信後結果不明」エラーでは返金をスキップする。
+      // SendTransactionError / TransactionExpiredBlockheightExceededError は
+      // トランザクションがオンチェーンで成功している可能性があるため、
+      // 返金すると二重返金（キュー登録済み＋SOL返金済み）になるリスクがある。
+      const isAmbiguousError =
+        err instanceof SendTransactionError ||
+        err instanceof TransactionExpiredBlockheightExceededError;
 
-      res.status(500).json({
-        error: 'Failed to join queue. Entry fee refund attempted.',
-        details: err instanceof Error ? err.message : String(err),
-      });
+      if (isAmbiguousError) {
+        console.error(
+          `[x402] AMBIGUOUS TX ERROR for ${walletAddress}: ` +
+          'Transaction may have succeeded on-chain. Skipping refund to prevent double-refund. ' +
+          'Manual investigation required.',
+        );
+        res.status(500).json({
+          error: 'Queue join status unknown. Transaction may have succeeded. Please check your queue status.',
+          details: err instanceof Error ? err.message : String(err),
+        });
+      } else {
+        // AnchorError（プログラムエラー）等、明確に失敗した場合のみ返金を実行
+        try {
+          await anchorClient.refundEntryFee(playerPubkey, entryFeeLamports);
+          console.log(`[x402] Entry fee refunded to ${walletAddress}: ${entryFeeLamports} lamports`);
+        } catch (refundErr) {
+          console.error('[x402] CRITICAL: Refund failed for', walletAddress, ':', refundErr);
+        }
+
+        res.status(500).json({
+          error: 'Failed to join queue. Entry fee refund attempted.',
+          details: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   });
 

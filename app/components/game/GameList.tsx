@@ -35,7 +35,7 @@ export function GameList({ filter = 'all', limit }: GameListProps) {
 
   if (isLoading) {
     return (
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" role="status" aria-label="ゲーム一覧を読み込み中">
         {[...Array(3)].map((_, i) => (
           <div key={i} className="glass rounded-2xl p-4 animate-pulse h-48" aria-hidden="true">
             <div className="h-3 bg-white/10 rounded mb-3 w-1/3" />

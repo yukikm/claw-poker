@@ -19,7 +19,11 @@ export function GameStatusBadge({ phase }: GameStatusBadgeProps) {
   const config = PHASE_CONFIG[phase] ?? PHASE_CONFIG.Waiting;
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${config.className}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${config.className}`}
+      role="status"
+      aria-label={`ゲーム状態: ${config.label}`}
+    >
       {config.label}
     </span>
   );

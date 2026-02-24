@@ -4,39 +4,6 @@ import { type GameSummary } from '@/lib/types';
 import { type GamePhase } from '@/lib/constants';
 import { getReadOnlyProgram } from '@/lib/anchor';
 
-/** Anchorがデコードした生のGameアカウントデータ */
-interface RawGameAccount {
-  gameId: { toString(): string };
-  phase: Record<string, unknown>;
-  handNumber: { toNumber(): number };
-  player1: PublicKey;
-  player2: PublicKey;
-  pot: { toNumber(): number };
-  winner: PublicKey | null;
-  bettingClosed: boolean;
-}
-
-/** Anchorがデコードした生のBettingPoolアカウントデータ */
-interface RawBettingPoolAccount {
-  gameId: { toString(): string };
-  totalBetPlayer1: { toNumber(): number };
-  totalBetPlayer2: { toNumber(): number };
-  betCount: number;
-  isClosed: boolean;
-}
-
-/** Anchorのaccount.all()戻り値の型 */
-interface AnchorAccountResult<T> {
-  publicKey: PublicKey;
-  account: T;
-}
-
-/** program.accountの型付きアクセス用インターフェース */
-interface TypedProgramAccounts {
-  game: { all(): Promise<AnchorAccountResult<RawGameAccount>[]> };
-  bettingPool: { all(): Promise<AnchorAccountResult<RawBettingPoolAccount>[]> };
-}
-
 export interface GamesStats {
   totalGames: number;
   activeGames: number;
@@ -100,10 +67,9 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
       const program = getReadOnlyProgram(connection);
 
       // Game と BettingPool を並列取得
-      const typedAccounts = program.account as unknown as TypedProgramAccounts;
       const [gameAccounts, poolAccounts] = await Promise.all([
-        typedAccounts.game.all(),
-        typedAccounts.bettingPool.all(),
+        program.account.game.all(),
+        program.account.bettingPool.all(),
       ]);
 
       // gameId をキーに BettingPool データをマップ化
@@ -122,7 +88,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
       const games: GameSummary[] = gameAccounts.map(
         ({ publicKey, account }) => {
           const game = account;
-          const phase = parsePhase(game.phase);
+          const phase = parsePhase(game.phase as unknown as Record<string, unknown>);
           const gameId: bigint = BigInt(game.gameId.toString());
           const bettingClosed = game.bettingClosed;
 
@@ -167,7 +133,8 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
 
       set({ games, stats, isLoading: false });
     } catch (err) {
-      set({ error: String(err), isLoading: false });
+      console.error('[gamesStore] fetchGames error:', err);
+      set({ error: 'ゲーム一覧の取得に失敗しました。しばらくしてから再試行してください。', isLoading: false });
     }
   },
 

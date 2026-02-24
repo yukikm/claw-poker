@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { Keypair } from '@solana/web3.js';
 
 interface PendingEvent {
   type: string;
@@ -17,6 +18,10 @@ interface ConnectionState {
   currentGameState: Record<string, unknown> | null;
   pendingEvents: PendingEvent[];
   heartbeatTimer: ReturnType<typeof setInterval> | null;
+  reconnectAttempts: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  serverUrl: string | null;
+  keypair: Keypair | null;
 }
 
 // Singleton connection state shared across all tools
@@ -35,6 +40,10 @@ export function getConnectionState(): ConnectionState {
       currentGameState: null,
       pendingEvents: [],
       heartbeatTimer: null,
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      serverUrl: null,
+      keypair: null,
     };
   }
   return connectionState;

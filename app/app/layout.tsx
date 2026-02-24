@@ -4,6 +4,8 @@ import "./globals.css";
 import { SolanaWalletProvider } from "@/providers/WalletProvider";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
+import { ConnectionStatus } from "@/components/layout/ConnectionStatus";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -35,8 +37,11 @@ export default function RootLayout({
       >
         <SolanaWalletProvider>
           <Header />
-          <main className="flex-1 pt-16">{children}</main>
+          <main className="flex-1 pt-16">
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </main>
           <Footer />
+          <ConnectionStatus />
         </SolanaWalletProvider>
       </body>
     </html>

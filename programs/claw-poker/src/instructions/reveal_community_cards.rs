@@ -16,6 +16,13 @@ pub fn handler(
 ) -> Result<()> {
     let game = &mut ctx.accounts.game;
 
+    // deck_commitmentが設定済みであること（VRFによるシャッフルが完了していること）を検証
+    // deck_commitment == [0; 32] はsettle_handでリセットされた未シャッフル状態を示す
+    require!(
+        game.deck_commitment != [0u8; 32],
+        PokerError::InvalidAction
+    );
+
     // カード値の範囲チェック（0-51）
     for card in board_cards.iter() {
         require!(*card < 52, PokerError::InvalidAction);

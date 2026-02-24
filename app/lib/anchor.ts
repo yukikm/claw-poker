@@ -2,17 +2,17 @@
 
 import { useMemo } from 'react';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
-import type { Idl } from '@coral-xyz/anchor';
 import { useAnchorWallet, useConnection } from '@solana/wallet-adapter-react';
 import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { type ClawPoker } from '../../target/types/claw_poker';
 import ClawPokerIdlJson from './claw_poker_idl.json';
 import { PROGRAM_ID } from './constants';
 
-export type { Program };
+export type { ClawPoker };
 
-export const ClawPokerIdl = ClawPokerIdlJson as Idl;
+export const ClawPokerIdl = ClawPokerIdlJson as ClawPoker;
 
-export type ClawPokerProgram = Program<Idl>;
+export type ClawPokerProgram = Program<ClawPoker>;
 
 export function useAnchorProgram(): ClawPokerProgram | null {
   const { connection } = useConnection();

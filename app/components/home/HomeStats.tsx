@@ -28,10 +28,14 @@ export function HomeStats() {
   ];
 
   return (
-    <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <section className="grid grid-cols-2 md:grid-cols-4 gap-4" aria-label="プラットフォーム統計">
       {items.map(({ label, value, color }) => (
         <div key={label} className="glass rounded-xl p-4 text-center">
-          <p className={`text-2xl font-bold font-mono ${color}`}>{value}</p>
+          {isLoading ? (
+            <div className="h-8 w-16 mx-auto bg-white/10 rounded animate-pulse" aria-hidden="true" />
+          ) : (
+            <p className={`text-2xl font-bold font-mono ${color}`}>{value}</p>
+          )}
           <p className="text-xs text-slate-500 mt-1">{label}</p>
         </div>
       ))}
