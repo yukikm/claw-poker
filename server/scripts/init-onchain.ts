@@ -13,8 +13,8 @@
  *   - プログラムが対象クラスターにデプロイ済み
  */
 
-import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
-import { AnchorProvider, Program, Idl, Wallet, Transaction, VersionedTransaction } from '@coral-xyz/anchor';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { AnchorProvider, Program, Idl, Wallet } from '@coral-xyz/anchor';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
