@@ -20,6 +20,15 @@ const PLATFORM_TREASURY = new PublicKey(
   process.env.PLATFORM_TREASURY_PUBKEY ?? SystemProgram.programId.toBase58(),
 );
 
+/** MagicBlock Delegation Program ID */
+const DELEGATION_PROG = new PublicKey('DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh');
+/** MagicBlock Permission Program ID */
+const PERMISSION_PROG = new PublicKey('PERMwfoGhaxc4V7SREhGEJrHjfMKMWBi9zfqRiAhmkd');
+/** MagicBlock TEE Validator (Devnet). 環境変数 MAGICBLOCK_VALIDATOR で上書き可能 */
+const VALIDATOR_PUBKEY = new PublicKey(
+  process.env.MAGICBLOCK_VALIDATOR ?? 'FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA',
+);
+
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in';
 
 export interface ActiveGame {
@@ -179,6 +188,38 @@ export class AnchorClient {
     return PublicKey.findProgramAddressSync([Buffer.from('betting_pool'), gameIdBuffer], PROGRAM_ID);
   }
 
+  /** Permission PDA: seeds = [b"permission", account_pubkey] under PERMISSION_PROG */
+  private derivePermissionPda(account: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from('permission'), account.toBuffer()],
+      PERMISSION_PROG,
+    )[0];
+  }
+
+  /** Delegation Buffer PDA: seeds = [b"buffer", account_pubkey] under DELEGATION_PROG */
+  private deriveDelegationBuffer(account: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from('buffer'), account.toBuffer()],
+      DELEGATION_PROG,
+    )[0];
+  }
+
+  /** Delegation Record PDA: seeds = [b"delegation-record", account_pubkey] under DELEGATION_PROG */
+  private deriveDelegationRecord(account: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from('delegation-record'), account.toBuffer()],
+      DELEGATION_PROG,
+    )[0];
+  }
+
+  /** Delegation Metadata PDA: seeds = [b"delegation-metadata", account_pubkey] under DELEGATION_PROG */
+  private deriveDelegationMetadata(account: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from('delegation-metadata'), account.toBuffer()],
+      DELEGATION_PROG,
+    )[0];
+  }
+
   // ─── トランザクション検証 ──────────────────────────────────────────────────
 
   /** sha256("global:enter_matchmaking_queue")[0..8] */
@@ -294,7 +335,7 @@ export class AnchorClient {
       .rpc();
 
     // Step 2: create_game_vault（QueueからVaultへ資金移動）
-    const txSig = await (this.l1Program.methods as unknown as {
+    await (this.l1Program.methods as unknown as {
       createGameVault: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
       };
@@ -309,7 +350,205 @@ export class AnchorClient {
       })
       .rpc();
 
-    console.log(`[AnchorClient] Game ${gameId} initialized: ${gamePda.toBase58()}, vault: ${vaultPda.toBase58()}`);
+    // Step 3: initialize_betting_pool（観戦者ベット受付用）
+    const [bettingPoolPda] = this.deriveBettingPoolPda(gameId);
+    await (this.l1Program.methods as unknown as {
+      initializeBettingPool: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .initializeBettingPool(new BN(gameId.toString()))
+      .accounts({
+        bettingPool: bettingPoolPda,
+        game: gamePda,
+        payer: operatorPubkey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // ── MagicBlock Private ER 初期化フロー ──────────────────────────────────
+    // Permission PDA 導出（Game + Player1State + Player2State 用）
+    const permissionGame = this.derivePermissionPda(gamePda);
+    const permissionP1   = this.derivePermissionPda(player1StatePda);
+    const permissionP2   = this.derivePermissionPda(player2StatePda);
+
+    // Step 4: create_permission_game（Game は public: members: None）
+    await (this.l1Program.methods as unknown as {
+      createPermissionGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .createPermissionGame(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        permission: permissionGame,
+        payer: operatorPubkey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 5: create_permission_player1（player + operator を ACL に追加）
+    await (this.l1Program.methods as unknown as {
+      createPermissionPlayer1: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .createPermissionPlayer1(new BN(gameId.toString()))
+      .accounts({
+        playerState: player1StatePda,
+        player: player1,
+        permission: permissionP1,
+        payer: operatorPubkey,
+        systemProgram: SystemProgram.programId,
+        game: gamePda,
+      })
+      .rpc();
+
+    // Step 6: create_permission_player2
+    await (this.l1Program.methods as unknown as {
+      createPermissionPlayer2: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .createPermissionPlayer2(new BN(gameId.toString()))
+      .accounts({
+        playerState: player2StatePda,
+        player: player2,
+        permission: permissionP2,
+        payer: operatorPubkey,
+        systemProgram: SystemProgram.programId,
+        game: gamePda,
+      })
+      .rpc();
+
+    // Step 7: delegate_game（Game データアカウントを ER に委譲）
+    await (this.l1Program.methods as unknown as {
+      delegateGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegateGame(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        game: gamePda,
+        ownerProgram: PROGRAM_ID,
+        validator: VALIDATOR_PUBKEY,
+        buffer: this.deriveDelegationBuffer(gamePda),
+        delegationRecord: this.deriveDelegationRecord(gamePda),
+        delegationMetadata: this.deriveDelegationMetadata(gamePda),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 8: delegate_player1（Player1State データアカウントを ER に委譲）
+    await (this.l1Program.methods as unknown as {
+      delegatePlayer1: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePlayer1(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        player: player1,
+        playerState: player1StatePda,
+        ownerProgram: PROGRAM_ID,
+        validator: VALIDATOR_PUBKEY,
+        buffer: this.deriveDelegationBuffer(player1StatePda),
+        delegationRecord: this.deriveDelegationRecord(player1StatePda),
+        delegationMetadata: this.deriveDelegationMetadata(player1StatePda),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 9: delegate_player2
+    await (this.l1Program.methods as unknown as {
+      delegatePlayer2: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePlayer2(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        player: player2,
+        playerState: player2StatePda,
+        ownerProgram: PROGRAM_ID,
+        validator: VALIDATOR_PUBKEY,
+        buffer: this.deriveDelegationBuffer(player2StatePda),
+        delegationRecord: this.deriveDelegationRecord(player2StatePda),
+        delegationMetadata: this.deriveDelegationMetadata(player2StatePda),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 10: delegate_permission_game（Game Permission PDA を ER に委譲）
+    await (this.l1Program.methods as unknown as {
+      delegatePermissionGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePermissionGame(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        game: gamePda,
+        permission: permissionGame,
+        permissionProgram: PERMISSION_PROG,
+        validator: VALIDATOR_PUBKEY,
+        delegationBuffer: this.deriveDelegationBuffer(permissionGame),
+        delegationRecord: this.deriveDelegationRecord(permissionGame),
+        delegationMetadata: this.deriveDelegationMetadata(permissionGame),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 11: delegate_permission_player1（Player1 Permission PDA を ER に委譲）
+    await (this.l1Program.methods as unknown as {
+      delegatePermissionPlayer1: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePermissionPlayer1(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        player: player1,
+        playerState: player1StatePda,
+        permission: permissionP1,
+        permissionProgram: PERMISSION_PROG,
+        validator: VALIDATOR_PUBKEY,
+        delegationBuffer: this.deriveDelegationBuffer(permissionP1),
+        delegationRecord: this.deriveDelegationRecord(permissionP1),
+        delegationMetadata: this.deriveDelegationMetadata(permissionP1),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 12: delegate_permission_player2
+    const txSig = await (this.l1Program.methods as unknown as {
+      delegatePermissionPlayer2: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePermissionPlayer2(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        player: player2,
+        playerState: player2StatePda,
+        permission: permissionP2,
+        permissionProgram: PERMISSION_PROG,
+        validator: VALIDATOR_PUBKEY,
+        delegationBuffer: this.deriveDelegationBuffer(permissionP2),
+        delegationRecord: this.deriveDelegationRecord(permissionP2),
+        delegationMetadata: this.deriveDelegationMetadata(permissionP2),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Game ${gameId} initialized with full Private ER delegation: gamePda=${gamePda.toBase58()}`);
     return txSig;
   }
 
@@ -354,11 +593,13 @@ export class AnchorClient {
   // ─── マッチメイキングキュー離脱 ──────────────────────────────────────────────
 
   /**
-   * leave_matchmaking_queue を呼び出してプレイヤーにエントリーフィーを返金する。
-   * オペレーターがplayerの代理として署名する（TEE/PERパターン）。
+   * leave_matchmaking_queue を呼び出してキューからプレイヤーエントリーを削除する。
+   * enter_matchmaking_queueと同様にoperatorが代理で呼び出す（playerはSignerではない）。
+   * 参加費の返金はx402プロトコル側で処理されるため、このメソッドはキュー削除のみを行う。
    */
   async leaveMatchmakingQueue(playerWallet: PublicKey): Promise<string> {
     const [queuePda] = this.deriveMatchmakingQueuePda();
+    const operatorPubkey = this.operatorKeypair.publicKey;
 
     const txSig = await (this.l1Program.methods as unknown as {
       leaveMatchmakingQueue: () => {
@@ -369,10 +610,11 @@ export class AnchorClient {
       .accounts({
         matchmakingQueue: queuePda,
         player: playerWallet,
+        operator: operatorPubkey,
       })
       .rpc();
 
-    console.log(`[AnchorClient] Player ${playerWallet.toBase58()} left queue, refund tx: ${txSig}`);
+    console.log(`[AnchorClient] Player ${playerWallet.toBase58()} removed from queue, tx: ${txSig}`);
     return txSig;
   }
 
@@ -467,24 +709,21 @@ export class AnchorClient {
       throw new Error(`Game account not found for gameId ${gameId}`);
     }
 
-    // player1: offset 8 (discriminator) + 8 (game_id) + 32 (operator) + 32 (platform_treasury) = 80
-    const player1 = new PublicKey(gameAccount.data.subarray(80, 112));
-    const player2 = new PublicKey(gameAccount.data.subarray(112, 144));
+    // M-x402-2と同様にIDLのcoder.accounts.decodeで動的にデコードし、バイナリオフセットのハードコードを排除
+    const decodedGame = this.erProgram.coder.accounts.decode('Game', gameAccount.data) as {
+      player1: PublicKey;
+      player2: PublicKey;
+    };
+    const player1 = decodedGame.player1;
+    const player2 = decodedGame.player2;
 
     const [player1StatePda] = this.derivePlayerStatePda(gameId, player1);
     const [player2StatePda] = this.derivePlayerStatePda(gameId, player2);
 
-    // Permission PDA導出
-    const PERMISSION_PROG = new PublicKey('PERMwfoGhaxc4V7SREhGEJrHjfMKMWBi9zfqRiAhmkd');
-    const [permissionP1] = PublicKey.findProgramAddressSync(
-      [Buffer.from('permission'), player1StatePda.toBuffer()], PERMISSION_PROG,
-    );
-    const [permissionP2] = PublicKey.findProgramAddressSync(
-      [Buffer.from('permission'), player2StatePda.toBuffer()], PERMISSION_PROG,
-    );
-    const [permissionGame] = PublicKey.findProgramAddressSync(
-      [Buffer.from('permission'), gamePda.toBuffer()], PERMISSION_PROG,
-    );
+    // Permission PDA導出（クラス定数のPERMISSION_PROGを使用）
+    const permissionP1   = this.derivePermissionPda(player1StatePda);
+    const permissionP2   = this.derivePermissionPda(player2StatePda);
+    const permissionGame = this.derivePermissionPda(gamePda);
 
     const txSig = await (this.erProgram.methods as unknown as {
       commitGame: (gameId: BN) => {
@@ -507,6 +746,33 @@ export class AnchorClient {
 
     console.log(`[AnchorClient] Checkpoint commit for game ${gameId}: ${txSig}`);
     return txSig;
+  }
+
+  /**
+   * ER上のGameアカウントから現在のpotとプレイヤーチップスタックを取得する。
+   * submitPlayerAction後の正確な状態をaction_accepted/opponent_actionメッセージに使用する。
+   */
+  async fetchGamePotAndStacks(gameId: bigint): Promise<{ pot: number; player1ChipStack: number; player2ChipStack: number } | null> {
+    try {
+      const [gamePda] = this.deriveGamePda(gameId);
+      const accountInfo = await this.erConnection.getAccountInfo(gamePda, 'confirmed');
+      if (!accountInfo) return null;
+
+      const decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as {
+        pot: { toNumber: () => number };
+        player1ChipStack?: { toNumber: () => number };
+        player2ChipStack?: { toNumber: () => number };
+      };
+
+      return {
+        pot: decoded.pot.toNumber(),
+        player1ChipStack: decoded.player1ChipStack?.toNumber() ?? 0,
+        player2ChipStack: decoded.player2ChipStack?.toNumber() ?? 0,
+      };
+    } catch (err) {
+      console.warn(`[AnchorClient] Failed to fetch game state for ${gameId}:`, err);
+      return null;
+    }
   }
 
   // ─── TEE認証 ────────────────────────────────────────────────────────────

@@ -109,6 +109,34 @@ pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
     game.street_action_taken = false;
     game.phase = GamePhase::PreFlop;
 
+    // ブラインド投入でAll-inが発生した場合のcurrent_turn補正
+    // current_turnは上記でSBプレイヤーに設定されているが、
+    // All-in状態によってはSBがアクション不可（chip_stack=0）になる場合がある
+    if game.betting_closed {
+        let sb_player = if sb_player_is_p1 { game.player1 } else { game.player2 };
+        let bb_player = if sb_player_is_p1 { game.player2 } else { game.player1 };
+        let sb_is_all_in = if sb_player_is_p1 {
+            game.player1_is_all_in
+        } else {
+            game.player2_is_all_in
+        };
+        let bb_is_all_in = if sb_player_is_p1 {
+            game.player2_is_all_in
+        } else {
+            game.player1_is_all_in
+        };
+
+        if sb_is_all_in && bb_is_all_in {
+            // 両者All-in: ベッティング不要、直接コミュニティカード公開へ
+            game.current_turn = Pubkey::default();
+        } else if sb_is_all_in {
+            // SBのみAll-in: BBにCall/Foldの機会を与える
+            game.current_turn = bb_player;
+        }
+        // BBのみAll-in: SBが先手で正しい（変更不要、SBはCall/Foldを選択）
+        let _ = sb_player; // suppress unused warning
+    }
+
     Ok(())
 }
 

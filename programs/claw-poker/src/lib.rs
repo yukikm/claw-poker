@@ -210,6 +210,8 @@ pub mod claw_poker {
 
     // テスト専用: VRFオラクルを経由せずデッキをシャッフルする
     // 本番ではrequest_shuffle/callback_dealのVRFフローを使用すること
+    // anchor-debugフィーチャーが有効な場合のみビルドされる
+    #[cfg(feature = "anchor-debug")]
     pub fn test_shuffle_and_deal(
         ctx: Context<TestShuffleAndDeal>,
         game_id: u64,

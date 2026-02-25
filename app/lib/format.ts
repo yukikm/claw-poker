@@ -35,8 +35,8 @@ export function cardDisplayString(card: CardDisplay): string {
 export function formatOdds(totalBetA: number, totalBetB: number): { odds1: string; odds2: string } {
   const total = totalBetA + totalBetB;
   if (total === 0) return { odds1: '1.00', odds2: '1.00' };
-  const odds1 = totalBetA > 0 ? (total / totalBetA).toFixed(2) : '∞';
-  const odds2 = totalBetB > 0 ? (total / totalBetB).toFixed(2) : '∞';
+  const odds1 = totalBetA > 0 ? (total / totalBetA).toFixed(2) : '---';
+  const odds2 = totalBetB > 0 ? (total / totalBetB).toFixed(2) : '---';
   return { odds1, odds2 };
 }
 

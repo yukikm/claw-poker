@@ -22,10 +22,12 @@ export class AgentHandler {
   private sessions = new Map<string, AgentSession>();
   private walletToSession = new Map<string, string>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private pendingGameIds = new Map<string, string>(); // walletAddress → gameId（切断前）
 
   private onJoinQueue: ((walletAddress: string, entryFeeSignature: string, entryFeeAmount: number) => void) | null = null;
   private onLeaveQueue: ((walletAddress: string) => void) | null = null;
   private onAction: ((walletAddress: string, gameId: string, action: ActionType, amount?: number) => void) | null = null;
+  private onReconnect: ((walletAddress: string, gameId: string) => void) | null = null;
 
   constructor() {
     this.startHeartbeatCheck();
@@ -41,6 +43,10 @@ export class AgentHandler {
 
   setOnAction(handler: (walletAddress: string, gameId: string, action: ActionType, amount?: number) => void): void {
     this.onAction = handler;
+  }
+
+  setOnReconnect(handler: (walletAddress: string, gameId: string) => void): void {
+    this.onReconnect = handler;
   }
 
   handleConnection(ws: WebSocket, sessionId: string): void {
@@ -112,8 +118,14 @@ export class AgentHandler {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    // Check nonce match
-    if (session.nonce !== nonce) {
+    // 既に認証済みの場合は再認証を拒否（null-nonceバイパス防止）
+    if (session.authenticated) {
+      this.sendError(session.ws, 'INVALID_TOKEN', 'Already authenticated');
+      return;
+    }
+
+    // Check nonce match (session.nonce が null の場合は必ず不一致になる)
+    if (session.nonce === null || session.nonce !== nonce) {
       const failed: AuthFailedMessage = { type: 'auth_failed', reason: 'nonce_expired' };
       this.sendMessage(session.ws, failed);
       return;
@@ -178,6 +190,16 @@ export class AgentHandler {
       expiresAt,
     };
     this.sendMessage(session.ws, success);
+
+    // 再接続チェック: 切断前にゲーム中だった場合はgameIdを復元してコールバックを呼ぶ
+    const pendingGameId = this.pendingGameIds.get(walletAddress);
+    if (pendingGameId) {
+      this.pendingGameIds.delete(walletAddress);
+      session.gameId = pendingGameId;
+      if (this.onReconnect) {
+        this.onReconnect(walletAddress, pendingGameId);
+      }
+    }
   }
 
   private handleJoinQueue(sessionId: string, token: string, entryFeeSignature: string, entryFeeAmount: number): void {
@@ -185,6 +207,12 @@ export class AgentHandler {
     if (!session) return;
 
     if (!this.validateToken(session, token)) return;
+
+    // 既にゲーム中の場合はキュー参加を拒否
+    if (session.gameId !== null) {
+      this.sendError(session.ws, 'GAME_IN_PROGRESS', 'You are already in an active game');
+      return;
+    }
 
     if (this.onJoinQueue && session.walletAddress) {
       this.onJoinQueue(session.walletAddress, entryFeeSignature, entryFeeAmount);
@@ -230,6 +258,10 @@ export class AgentHandler {
     if (!session) return;
 
     if (session.walletAddress) {
+      // ゲーム中の切断: gameIdを保存して再接続時に状態復元できるようにする
+      if (session.gameId) {
+        this.pendingGameIds.set(session.walletAddress, session.gameId);
+      }
       this.walletToSession.delete(session.walletAddress);
     }
     this.sessions.delete(sessionId);
@@ -318,5 +350,6 @@ export class AgentHandler {
     }
     this.sessions.clear();
     this.walletToSession.clear();
+    this.pendingGameIds.clear();
   }
 }

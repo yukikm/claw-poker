@@ -26,7 +26,7 @@ function PlayingCard({ card, index }: { card: CardDisplay; index: number }) {
           : 'bg-slate-800 border-white/10 text-slate-600'
         }
       `}
-      aria-label={isVisible ? cardDisplayString(card) : '未公開カード'}
+      aria-label={isVisible ? cardDisplayString(card) : 'Hidden card'}
     >
       {isVisible ? cardDisplayString(card) : '?'}
     </motion.div>
@@ -43,7 +43,7 @@ export function CommunityCards({ cards, phase }: CommunityCardsProps) {
   );
 
   return (
-    <div className="flex gap-2 md:gap-3 items-center justify-center" role="list" aria-label="コミュニティカード">
+    <div className="flex gap-2 md:gap-3 items-center justify-center" role="list" aria-label="Community Cards">
       {displayCards.map((card, i) => (
         <div key={i} role="listitem">
           <PlayingCard card={card} index={i} />

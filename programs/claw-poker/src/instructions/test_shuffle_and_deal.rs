@@ -1,3 +1,7 @@
+// このモジュール全体はanchor-debugフィーチャーが有効な場合のみコンパイルされる。
+// mod.rsおよびlib.rsの#[cfg(feature = "anchor-debug")]により制御される。
+// 本番ビルドでは `cargo build-bpf` (デフォルトフィーチャーのみ) を使用し、
+// このインストラクションが含まれないようにすること。
 use anchor_lang::prelude::*;
 use sha2::{Sha256, Digest};
 use crate::state::{Game, GamePhase, PlayerState};
@@ -110,6 +114,27 @@ pub fn handler(ctx: Context<TestShuffleAndDeal>, _game_id: u64, random_seed: [u8
     game.last_raise_amount = bb;
     game.street_action_taken = false;
     game.phase = GamePhase::PreFlop;
+
+    // ブラインド投入でAll-inが発生した場合のcurrent_turn補正
+    if game.betting_closed {
+        let bb_player = if sb_player_is_p1 { game.player2 } else { game.player1 };
+        let sb_is_all_in = if sb_player_is_p1 {
+            game.player1_is_all_in
+        } else {
+            game.player2_is_all_in
+        };
+        let bb_is_all_in = if sb_player_is_p1 {
+            game.player2_is_all_in
+        } else {
+            game.player1_is_all_in
+        };
+
+        if sb_is_all_in && bb_is_all_in {
+            game.current_turn = Pubkey::default();
+        } else if sb_is_all_in {
+            game.current_turn = bb_player;
+        }
+    }
 
     Ok(())
 }

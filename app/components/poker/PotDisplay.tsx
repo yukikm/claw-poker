@@ -15,7 +15,7 @@ export function PotDisplay({ pot }: PotDisplayProps) {
       transition={{ duration: 0.2 }}
       className="flex flex-col items-center gap-1"
       aria-live="polite"
-      aria-label={`ポット: ${pot} チップ`}
+      aria-label={`Pot: ${pot} chips`}
     >
       <span className="text-xs text-slate-500 uppercase tracking-wider">POT</span>
       <div className="glass-cyan rounded-full px-5 py-2">

@@ -171,7 +171,12 @@ function mapGameAccount(
     },
     player1Key,
     player2Key,
-    winner: rawGame.winner as PublicKey | null,
+    winner: (() => {
+      const w = rawGame.winner as PublicKey | null;
+      // Pubkey::default()（SystemProgram = 11111...1）はwinner未確定を示す
+      if (w == null || w.toBase58() === '11111111111111111111111111111111') return null;
+      return w;
+    })(),
     bettingPoolPda,
     dealerPosition: rawGame.dealerPosition as number,
     lastRaiseAmount: toBN(rawGame.lastRaiseAmount),
@@ -187,7 +192,11 @@ function mapBettingPoolAccount(rawPool: Record<string, unknown>): BettingPoolSta
     totalBetPlayer2: toBN(rawPool.totalBetPlayer2),
     betCount: rawPool.betCount as number,
     isClosed: toBool(rawPool.isClosed),
-    winner: rawPool.winner as PublicKey | null,
+    winner: (() => {
+      const w = rawPool.winner as PublicKey | null;
+      if (w == null || w.toBase58() === '11111111111111111111111111111111') return null;
+      return w;
+    })(),
     distributed: toBool(rawPool.distributed),
   };
 }

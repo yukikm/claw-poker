@@ -177,10 +177,25 @@ pub fn handler(
             game.last_raise_amount = bet_amount;
 
             update_game_committed(game, is_player1, player_state.chips_committed);
+
+            // Bet全スタック投入時は自動AllIn
+            if player_state.chip_stack == 0 {
+                player_state.is_all_in = true;
+                if is_player1 {
+                    game.player1_is_all_in = true;
+                } else {
+                    game.player2_is_all_in = true;
+                }
+                game.betting_closed = true;
+            }
+
             game.current_turn = opponent_key;
         }
 
         PlayerAction::Raise => {
+            // Raiseは相手のベットに直面している場合のみ有効。
+            // 同額ならBetを使うべきであり、Raiseは不正アクション。
+            require!(opp_committed > my_committed, PokerError::InvalidAction);
             let raise_to = amount.ok_or(PokerError::InvalidAction)?;
             // 最小レイズ検証: raise_to >= opponent_committed + last_raise_amount
             let min_raise = opp_committed
@@ -206,6 +221,18 @@ pub fn handler(
             game.last_raise_amount = raise_increment;
 
             update_game_committed(game, is_player1, player_state.chips_committed);
+
+            // Raise全スタック投入時は自動AllIn
+            if player_state.chip_stack == 0 {
+                player_state.is_all_in = true;
+                if is_player1 {
+                    game.player1_is_all_in = true;
+                } else {
+                    game.player2_is_all_in = true;
+                }
+                game.betting_closed = true;
+            }
+
             game.current_turn = opponent_key;
         }
 
@@ -258,20 +285,6 @@ pub fn handler(
         game.consecutive_timeouts_p1 = 0;
     } else {
         game.consecutive_timeouts_p2 = 0;
-    }
-
-    // RiverのベッティングラウンドをCheckまたはCallで終了した場合、Showdownへ
-    // was_action_takenが false の場合は初手Checkによる誤発火を防ぐ
-    if game.phase == GamePhase::River
-        && was_action_taken
-        && game.player1_committed == game.player2_committed
-        && game.current_turn != Pubkey::default()
-        && !matches!(action, PlayerAction::Fold)
-        && !matches!(action, PlayerAction::Bet)
-        && !matches!(action, PlayerAction::Raise)
-        && !matches!(action, PlayerAction::AllIn)
-    {
-        game.phase = GamePhase::Showdown;
     }
 
     Ok(())

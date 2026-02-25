@@ -129,7 +129,7 @@ export interface GameCompleteMessage {
   payoutAmount: number;
   payoutSignature: string;
   houseFee: number;
-  reason: 'opponent_eliminated' | 'disconnect' | 'agreement';
+  reason: 'opponent_eliminated' | 'disconnect' | 'agreement' | 'timeout_forfeit';
 }
 
 export interface ErrorMessage {
@@ -145,6 +145,22 @@ export interface PongMessage {
   serverTime: number;
 }
 
+/** 再接続時にゲーム状態を同期するためのメッセージ */
+export interface GameStateMessage {
+  type: 'game_state';
+  gameId: string;
+  phase: string;
+  handNumber: number;
+  myStack: number;
+  opponentStack: number;
+  pot: number;
+  communityCards: string[];
+  currentSmallBlind: number;
+  currentBigBlind: number;
+  dealerPosition: 'player1' | 'player2';
+  isMyTurn: boolean;
+}
+
 export type ServerMessage =
   | AuthChallengeMessage
   | AuthSuccessMessage
@@ -158,6 +174,7 @@ export type ServerMessage =
   | CommunityCardsRevealedMessage
   | HandCompleteMessage
   | GameCompleteMessage
+  | GameStateMessage
   | ErrorMessage
   | PongMessage;
 

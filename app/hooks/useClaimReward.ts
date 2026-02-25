@@ -8,10 +8,10 @@ import { useAnchorProgram, getProgramId } from '@/lib/anchor';
 import { useMyBetsStore } from '@/stores/myBetsStore';
 
 const ANCHOR_ERROR_MESSAGES: Record<number, string> = {
-  6006: '報酬はすでにクレーム済みです。',
-  6007: 'このゲームはまだ終了していません。',
-  6008: 'ベットが見つかりません。',
-  6009: 'このゲームに勝者が決定されていません。',
+  6006: 'Reward already claimed.',
+  6007: 'This game has not finished yet.',
+  6008: 'Bet not found.',
+  6009: 'No winner has been determined for this game.',
 };
 
 function sanitizeClaimError(err: unknown): string {
@@ -30,14 +30,14 @@ function sanitizeClaimError(err: unknown): string {
   }
 
   if (message.includes('insufficient funds') || message.includes('Insufficient funds')) {
-    return '残高不足です。';
+    return 'Insufficient balance.';
   }
 
   if (message.includes('User rejected')) {
-    return 'トランザクションがキャンセルされました。';
+    return 'Transaction cancelled.';
   }
 
-  return '報酬のクレームに失敗しました。もう一度お試しください。';
+  return 'Failed to claim reward. Please try again.';
 }
 
 export function useClaimReward() {
@@ -54,7 +54,7 @@ export function useClaimReward() {
     betRecordPda: PublicKey
   ): Promise<string | null> => {
     if (!publicKey || !program) {
-      setError('ウォレットを接続してください');
+      setError('Please connect your wallet');
       return null;
     }
 
@@ -66,7 +66,7 @@ export function useClaimReward() {
       const view = new DataView(gameIdBuffer.buffer);
       view.setBigUint64(0, gameId, true);
 
-      // Game PDA（IDLのPDA定義に基づき game_id から導出）
+      // Game PDA derived from game_id per IDL PDA definition
       const [gamePda] = PublicKey.findProgramAddressSync(
         [Buffer.from('game'), gameIdBuffer],
         programId

@@ -12,7 +12,7 @@ export function GameCard({ game }: GameCardProps) {
     <Link
       href={`/games/${game.gameId.toString()}`}
       className="block glass rounded-2xl p-4 hover:border-cyan-500/30 hover:shadow-neon-cyan transition-all duration-200 group"
-      aria-label={`ゲーム ${game.gameId} を観戦`}
+      aria-label={`Watch Game ${game.gameId}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -21,7 +21,7 @@ export function GameCard({ game }: GameCardProps) {
         </div>
         {game.isBettable && (
           <span className="text-xs bg-green-500/20 text-green-300 border border-green-500/30 rounded-full px-2 py-0.5">
-            ベット可
+            Bettable
           </span>
         )}
       </div>
@@ -37,8 +37,8 @@ export function GameCard({ game }: GameCardProps) {
       </div>
 
       <div className="flex items-center justify-between text-xs text-slate-500">
-        <span>ハンド #{game.handNumber}</span>
-        <span className="text-cyan-400 group-hover:text-white transition-colors">観戦する →</span>
+        <span>Hand #{game.handNumber}</span>
+        <span className="text-cyan-400 group-hover:text-white transition-colors">Watch →</span>
       </div>
     </Link>
   );

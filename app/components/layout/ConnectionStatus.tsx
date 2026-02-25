@@ -10,20 +10,29 @@ export function ConnectionStatus() {
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+
+    function scheduleReconnect() {
+      // Exponential backoff: 1s → 2s → 4s → 8s → max 30s
+      const delayMs = Math.min(1000 * Math.pow(2, retryCount), 30000);
+      retryCount++;
+      reconnectTimer = setTimeout(checkConnection, delayMs);
+    }
 
     function checkConnection() {
       connection.getSlot('confirmed').then(() => {
         setIsDisconnected(false);
         setIsReconnecting(false);
+        retryCount = 0;
       }).catch(() => {
         setIsDisconnected(true);
-        // 自動再接続を試行
+        // Attempt auto-reconnect with exponential backoff
         setIsReconnecting(true);
-        reconnectTimer = setTimeout(checkConnection, 5000);
+        scheduleReconnect();
       });
     }
 
-    // 30秒間隔でヘルスチェック
+    // Health check every 30 seconds
     const healthCheck = setInterval(checkConnection, 30000);
 
     return () => {
@@ -43,8 +52,8 @@ export function ConnectionStatus() {
       <div className="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-pulse" aria-hidden="true" />
       <p className="text-sm text-yellow-300">
         {isReconnecting
-          ? 'ネットワーク接続を再試行中...'
-          : 'ネットワーク接続が切断されました'}
+          ? 'Retrying network connection...'
+          : 'Network connection lost'}
       </p>
     </div>
   );

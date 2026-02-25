@@ -6,7 +6,7 @@ use ephemeral_rollups_sdk::access_control::structs::{
     Member, MembersArgs,
     AUTHORITY_FLAG, TX_LOGS_FLAG,
 };
-use crate::state::PlayerState;
+use crate::state::{Game, PlayerState};
 
 fn create_permission_for_player<'info>(
     player_state: &Account<'info, PlayerState>,
@@ -14,11 +14,18 @@ fn create_permission_for_player<'info>(
     payer: &Signer<'info>,
     system_program: &Program<'info, System>,
     player_key: Pubkey,
+    operator_key: Pubkey,
     game_id: u64,
     player_bump: u8,
 ) -> Result<()> {
-    let flags = AUTHORITY_FLAG | TX_LOGS_FLAG;
-    let members = vec![Member { flags, pubkey: player_key }];
+    // プレイヤー: 完全アクセス（自身のホールカード読み取り + TXログ）
+    // オペレーター: 読み取りのみ（重複チェック等のための正当なホールカードアクセス）
+    let player_flags = AUTHORITY_FLAG | TX_LOGS_FLAG;
+    let operator_flags = AUTHORITY_FLAG;
+    let members = vec![
+        Member { flags: player_flags, pubkey: player_key },
+        Member { flags: operator_flags, pubkey: operator_key },
+    ];
 
     let ix = CreatePermission {
         permissioned_account: player_state.key(),
@@ -54,6 +61,7 @@ fn create_permission_for_player<'info>(
 
 pub fn handler_player1(ctx: Context<CreatePermissionPlayer1>, game_id: u64) -> Result<()> {
     let player_key = ctx.accounts.player.key();
+    let operator_key = ctx.accounts.game.operator;
     let bump = ctx.accounts.player_state.bump;
     create_permission_for_player(
         &ctx.accounts.player_state,
@@ -61,6 +69,7 @@ pub fn handler_player1(ctx: Context<CreatePermissionPlayer1>, game_id: u64) -> R
         &ctx.accounts.payer,
         &ctx.accounts.system_program,
         player_key,
+        operator_key,
         game_id,
         bump,
     )
@@ -68,6 +77,7 @@ pub fn handler_player1(ctx: Context<CreatePermissionPlayer1>, game_id: u64) -> R
 
 pub fn handler_player2(ctx: Context<CreatePermissionPlayer2>, game_id: u64) -> Result<()> {
     let player_key = ctx.accounts.player.key();
+    let operator_key = ctx.accounts.game.operator;
     let bump = ctx.accounts.player_state.bump;
     create_permission_for_player(
         &ctx.accounts.player_state,
@@ -75,6 +85,7 @@ pub fn handler_player2(ctx: Context<CreatePermissionPlayer2>, game_id: u64) -> R
         &ctx.accounts.payer,
         &ctx.accounts.system_program,
         player_key,
+        operator_key,
         game_id,
         bump,
     )
@@ -97,6 +108,12 @@ pub struct CreatePermissionPlayer1<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
+    /// Gameアカウント: operator pubkeyを読み取りACLに追加するために参照
+    #[account(
+        seeds = [b"game", game_id.to_le_bytes().as_ref()],
+        bump = game.bump,
+    )]
+    pub game: Account<'info, Game>,
 }
 
 #[derive(Accounts)]
@@ -116,4 +133,10 @@ pub struct CreatePermissionPlayer2<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
+    /// Gameアカウント: operator pubkeyを読み取りACLに追加するために参照
+    #[account(
+        seeds = [b"game", game_id.to_le_bytes().as_ref()],
+        bump = game.bump,
+    )]
+    pub game: Account<'info, Game>,
 }

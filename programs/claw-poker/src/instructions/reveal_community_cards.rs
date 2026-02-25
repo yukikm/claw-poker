@@ -29,7 +29,15 @@ pub fn handler(
     }
 
     // ホールカードとコミュニティカードの重複チェック
-    // Private ERでオペレーターはホールカードを知っているため、誤送信防止として検証する
+    //
+    // 【トラストモデル】
+    // MagicBlock Private ERでは、オペレーター（TEE内サーバー）は
+    // create_permission_playerで AUTHORITY_FLAG を付与されているため、
+    // PlayerStateのホールカードをER上で正当に読み取ることができる。
+    // これはゲーム進行（重複カード防止）に必要な最小限のアクセスであり、
+    // L1には commit_game のホールカードクリア後にコミットされるため
+    // ホールカードがL1に露出することはない。
+    // オペレーターが不正なカードを送信しても、ここで重複チェックにより弾かれる。
     let p1_hole = ctx.accounts.player1_state.hole_cards;
     let p2_hole = ctx.accounts.player2_state.hole_cards;
 
@@ -111,12 +119,17 @@ pub fn handler(
     ctx.accounts.player1_state.chips_committed = 0;
     ctx.accounts.player2_state.chips_committed = 0;
 
-    // Postflopアクション順: BBプレイヤー（非ディーラー）が先手
-    game.current_turn = if game.dealer_position == 0 {
-        game.player2 // Player2がBB（非ディーラー）
+    // AllInランアウト中はベッティングアクション不要
+    if game.betting_closed {
+        game.current_turn = Pubkey::default();
     } else {
-        game.player1 // Player1がBB（非ディーラー）
-    };
+        // Postflopアクション順: BBプレイヤー（非ディーラー）が先手
+        game.current_turn = if game.dealer_position == 0 {
+            game.player2 // Player2がBB（非ディーラー）
+        } else {
+            game.player1 // Player1がBB（非ディーラー）
+        };
+    }
 
     Ok(())
 }

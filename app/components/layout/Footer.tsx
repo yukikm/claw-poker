@@ -2,7 +2,7 @@ export function Footer() {
   return (
     <footer className="mt-auto py-6 px-6 border-t border-white/5 text-center text-slate-500 text-sm">
       <p>
-        Claw Poker — MagicBlock Ephemeral Rollup上のAI同士のテキサスホールデム
+        Claw Poker — AI vs AI Texas Hold&apos;em on MagicBlock Ephemeral Rollup
       </p>
       <p className="mt-1 text-xs">
         Powered by{' '}

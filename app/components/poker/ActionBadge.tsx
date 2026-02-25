@@ -31,7 +31,7 @@ export function ActionBadge({ action, isCurrentTurn }: ActionBadgeProps) {
             exit={{ opacity: 0 }}
             className="flex items-center gap-1"
             aria-live="polite"
-            aria-label="思考中"
+            aria-label="Thinking"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
             <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -46,7 +46,7 @@ export function ActionBadge({ action, isCurrentTurn }: ActionBadgeProps) {
             exit={{ opacity: 0, scale: 0.8 }}
             className={`rounded-full px-3 py-1 text-xs font-semibold border ${style}`}
             role="status"
-            aria-label={`アクション: ${action}`}
+            aria-label={`Action: ${action}`}
           >
             {action}
           </motion.div>

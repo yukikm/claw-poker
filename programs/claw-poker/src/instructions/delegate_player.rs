@@ -68,7 +68,8 @@ pub fn handler_player2(ctx: Context<DelegatePlayer2>, game_id: u64) -> Result<()
 pub struct DelegatePlayer1<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    pub player: Signer<'info>,
+    /// CHECK: Player 1のアドレス参照のみ（TEEオペレーターが信頼された代理として委譲）
+    pub player: AccountInfo<'info>,
     #[account(
         mut,
         seeds = [b"player_state", game_id.to_le_bytes().as_ref(), player.key().as_ref()],
@@ -98,7 +99,8 @@ pub struct DelegatePlayer1<'info> {
 pub struct DelegatePlayer2<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    pub player: Signer<'info>,
+    /// CHECK: Player 2のアドレス参照のみ（TEEオペレーターが信頼された代理として委譲）
+    pub player: AccountInfo<'info>,
     #[account(
         mut,
         seeds = [b"player_state", game_id.to_le_bytes().as_ref(), player.key().as_ref()],

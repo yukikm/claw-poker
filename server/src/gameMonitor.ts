@@ -29,6 +29,10 @@ export interface DecodedGameState {
   bettingClosed: boolean;
   streetActionTaken: boolean;
   lastActionAt: number;
+  /** ショーダウン時のPlayer1ホールカード ([255,255] = 未公開/クリア済み) */
+  showdownCardsP1: [string, string] | null;
+  /** ショーダウン時のPlayer2ホールカード ([255,255] = 未公開/クリア済み) */
+  showdownCardsP2: [string, string] | null;
   player1HasFolded: boolean;
   player2HasFolded: boolean;
   player1IsAllIn: boolean;
@@ -185,11 +189,23 @@ export class GameMonitor {
       // created_at (i64) - skip
       offset += 8;
 
-      // showdown_cards_p1 (2 bytes) - skip
+      // showdown_cards_p1 (2 bytes)
+      const sdCard1P1 = data.readUInt8(offset);
+      const sdCard2P1 = data.readUInt8(offset + 1);
       offset += 2;
+      const showdownCardsP1: [string, string] | null =
+        sdCard1P1 !== CARD_UNKNOWN && sdCard2P1 !== CARD_UNKNOWN
+          ? [decodeCard(sdCard1P1), decodeCard(sdCard2P1)]
+          : null;
 
-      // showdown_cards_p2 (2 bytes) - skip
+      // showdown_cards_p2 (2 bytes)
+      const sdCard1P2 = data.readUInt8(offset);
+      const sdCard2P2 = data.readUInt8(offset + 1);
       offset += 2;
+      const showdownCardsP2: [string, string] | null =
+        sdCard1P2 !== CARD_UNKNOWN && sdCard2P2 !== CARD_UNKNOWN
+          ? [decodeCard(sdCard1P2), decodeCard(sdCard2P2)]
+          : null;
 
       const player1HasFolded = data.readUInt8(offset) === 1;
       offset += 1;
@@ -227,6 +243,8 @@ export class GameMonitor {
         bettingClosed,
         streetActionTaken,
         lastActionAt,
+        showdownCardsP1,
+        showdownCardsP2,
         player1HasFolded,
         player2HasFolded,
         player1IsAllIn,

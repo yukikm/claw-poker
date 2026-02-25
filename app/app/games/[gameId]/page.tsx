@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, useMemo } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useGameSubscription } from '@/hooks/useGameSubscription';
 import { PokerTable } from '@/components/poker/PokerTable';
@@ -12,43 +12,28 @@ interface PageProps {
   params: Promise<{ gameId: string }>;
 }
 
-function getGamePda(gameId: bigint): PublicKey {
-  const gameIdBuffer = Buffer.alloc(8);
-  const view = new DataView(gameIdBuffer.buffer);
-  view.setBigUint64(0, gameId, true);
-
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('game'), gameIdBuffer],
-    getProgramId()
-  );
-  return pda;
-}
-
-function getBettingPoolPda(gameId: bigint): PublicKey {
-  const gameIdBuffer = Buffer.alloc(8);
-  const view = new DataView(gameIdBuffer.buffer);
-  view.setBigUint64(0, gameId, true);
-
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('betting_pool'), gameIdBuffer],
-    getProgramId()
-  );
-  return pda;
-}
+const PROGRAM_ID = getProgramId();
 
 export default function GameWatchPage({ params }: PageProps) {
   const { gameId: gameIdStr } = use(params);
-  const gameId = BigInt(gameIdStr);
-  const gamePda = getGamePda(gameId);
-  const bettingPoolPda = getBettingPoolPda(gameId);
+
+  const { gameId, gamePda, bettingPoolPda } = useMemo(() => {
+    const id = BigInt(gameIdStr);
+    const buf = Buffer.alloc(8);
+    const view = new DataView(buf.buffer);
+    view.setBigUint64(0, id, true);
+    const [gPda] = PublicKey.findProgramAddressSync([Buffer.from('game'), buf], PROGRAM_ID);
+    const [bpPda] = PublicKey.findProgramAddressSync([Buffer.from('betting_pool'), buf], PROGRAM_ID);
+    return { gameId: id, gamePda: gPda, bettingPoolPda: bpPda };
+  }, [gameIdStr]);
 
   const { game, bettingPool, isLoading } = useGameSubscription(gamePda, bettingPoolPda);
 
   if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="glass rounded-3xl h-[500px] animate-pulse flex items-center justify-center" role="status" aria-label="読み込み中">
-          <p className="text-slate-500">ゲームデータを読み込み中...</p>
+        <div className="glass rounded-3xl h-[500px] animate-pulse flex items-center justify-center" role="status" aria-label="Loading">
+          <p className="text-slate-500">Loading game data...</p>
         </div>
       </div>
     );
@@ -58,7 +43,7 @@ export default function GameWatchPage({ params }: PageProps) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="glass rounded-xl p-8 text-center text-slate-400" role="alert">
-          ゲームが見つかりません（ID: {gameIdStr}）
+          Game not found (ID: {gameIdStr})
         </div>
       </div>
     );
@@ -71,7 +56,7 @@ export default function GameWatchPage({ params }: PageProps) {
         <div className="flex-1 space-y-4">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-white">
-              ゲーム <span className="text-cyan-400 font-mono">#{gameIdStr}</span> 観戦
+              Game <span className="text-cyan-400 font-mono">#{gameIdStr}</span>
             </h1>
           </div>
 
@@ -83,11 +68,11 @@ export default function GameWatchPage({ params }: PageProps) {
               <AgentInfo address={game.player1Key} label="Player 1" colorClass="text-cyan-300" />
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div>
-                  <p className="text-xs text-slate-500">チップ</p>
+                  <p className="text-xs text-slate-500">Chips</p>
                   <p className="font-mono text-white">{game.player1.chips}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500">コミット</p>
+                  <p className="text-xs text-slate-500">Committed</p>
                   <p className="font-mono text-yellow-300">{game.player1.chipsCommitted}</p>
                 </div>
               </div>
@@ -97,11 +82,11 @@ export default function GameWatchPage({ params }: PageProps) {
               <AgentInfo address={game.player2Key} label="Player 2" colorClass="text-purple-300" />
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div>
-                  <p className="text-xs text-slate-500">チップ</p>
+                  <p className="text-xs text-slate-500">Chips</p>
                   <p className="font-mono text-white">{game.player2.chips}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500">コミット</p>
+                  <p className="text-xs text-slate-500">Committed</p>
                   <p className="font-mono text-yellow-300">{game.player2.chipsCommitted}</p>
                 </div>
               </div>
@@ -110,7 +95,7 @@ export default function GameWatchPage({ params }: PageProps) {
         </div>
 
         {/* Betting sidebar */}
-        <aside className="w-full lg:w-80 space-y-4" aria-label="ベッティングパネル">
+        <aside className="w-full lg:w-80 space-y-4" aria-label="Betting panel">
           <BettingPanel
             gameId={gameId}
             gamePda={gamePda}

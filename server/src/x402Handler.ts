@@ -39,16 +39,38 @@ export function createX402Router(
     const recipient = anchorClient.getOperatorPublicKey().toString();
 
     // Coinbase CDP facilitator設定（環境変数から読み込み）
-    let facilitatorConfig: import('@coinbase/x402').FacilitatorConfig | undefined;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createFacilitatorConfig } = require('@coinbase/x402');
-      facilitatorConfig = createFacilitatorConfig({
-        apiKeyId: process.env.CDP_API_KEY_ID,
-        apiKeySecret: process.env.CDP_API_KEY_SECRET,
-      });
-    } catch {
-      console.warn('⚠️  @coinbase/x402 not installed, using default facilitator');
+    // @coinbase/x402 の package.json の types フィールドが壊れているため inline import 型は使わない
+    type FacilitatorConfig = { url: string; createAuthHeaders?: unknown };
+    let facilitatorConfig: FacilitatorConfig | undefined;
+    const hasCdpKeys = !!(process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET);
+    if (hasCdpKeys) {
+      // APIキーが設定されている場合はCDPファシリテーターを使用
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { createFacilitatorConfig } = require('@coinbase/x402');
+        facilitatorConfig = createFacilitatorConfig({
+          apiKeyId: process.env.CDP_API_KEY_ID,
+          apiKeySecret: process.env.CDP_API_KEY_SECRET,
+        });
+        console.log('[x402] CDP facilitator configured');
+      } catch (cdpErr) {
+        // モジュール未インストールの場合は警告のみ
+        const isModuleNotFound =
+          cdpErr instanceof Error && cdpErr.message.includes('Cannot find module');
+        if (isModuleNotFound) {
+          console.warn('⚠️  @coinbase/x402 not installed but CDP keys are set. Run: npm install @coinbase/x402');
+        } else {
+          // APIキー設定ミスなど設定エラーは本番環境では致命的
+          if (process.env.NODE_ENV === 'production') {
+            throw new Error(
+              `[x402] CRITICAL: CDP facilitator configuration failed: ${cdpErr instanceof Error ? cdpErr.message : String(cdpErr)}`,
+            );
+          }
+          console.error('[x402] CDP facilitator configuration failed (using default):', cdpErr);
+        }
+      }
+    } else {
+      console.log('[x402] CDP_API_KEY_ID/CDP_API_KEY_SECRET not set, using default facilitator');
     }
 
     // M-x402-1: SignatureStore（リプレイ攻撃防止）について
@@ -63,7 +85,7 @@ export function createX402Router(
         {
           '/api/v1/queue/join': {
             price: `${DEFAULT_ENTRY_FEE_SOL} SOL`,
-            network: 'solana:devnet',
+            network: (process.env.SOLANA_NETWORK ?? 'solana:devnet') as 'solana:devnet' | 'solana:mainnet',
             config: { description: 'Claw Poker Entry Fee' },
           },
         },

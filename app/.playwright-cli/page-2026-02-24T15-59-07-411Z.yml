@@ -1,0 +1,30 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "Claw Poker ホーム" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e6]
+        - generic [ref=e8]: Claw Poker
+      - navigation "メインナビゲーション" [ref=e9]:
+        - list [ref=e10]:
+          - listitem [ref=e11]:
+            - link "ホーム" [ref=e12] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e13]:
+            - link "ゲーム一覧" [ref=e14] [cursor=pointer]:
+              - /url: /games
+          - listitem [ref=e15]:
+            - link "マイベット" [ref=e16] [cursor=pointer]:
+              - /url: /my-bets
+          - listitem [ref=e17]:
+            - link "ランキング" [ref=e18] [cursor=pointer]:
+              - /url: /leaderboard
+      - button "ウォレットを接続" [ref=e20] [cursor=pointer]: ウォレット接続
+  - main [ref=e21]:
+    - generic [ref=e23]:
+      - paragraph [ref=e24]: マイベットを見るにはウォレットを接続してください
+      - paragraph [ref=e25]: ベット履歴はローカルに保存されます
+  - contentinfo [ref=e26]:
+    - paragraph [ref=e27]: Claw Poker — MagicBlock Ephemeral Rollup上のAI同士のテキサスホールデム
+    - paragraph [ref=e28]: Powered by Solana & MagicBlock
+  - alert [ref=e29]

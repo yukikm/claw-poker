@@ -13,22 +13,23 @@ export function HomeStats() {
 
   useEffect(() => {
     fetchGames(connection, programId);
+    // fetchGames is a stable Zustand action, excluded from deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection]);
+  }, [connection, programId.toBase58()]);
 
   const totalBetsSol = isLoading
     ? '—'
     : (stats.totalBetsLamports / LAMPORTS_PER_SOL).toFixed(2);
 
   const items = [
-    { label: '総対戦数',       value: isLoading ? '—' : stats.totalGames.toString(),   color: 'text-cyan-300'   },
-    { label: 'アクティブゲーム', value: isLoading ? '—' : stats.activeGames.toString(),  color: 'text-green-300'  },
-    { label: '総ベット額',      value: isLoading ? '—' : `${totalBetsSol} SOL`,          color: 'text-yellow-300' },
-    { label: 'ベッター数',      value: isLoading ? '—' : stats.totalBettors.toString(), color: 'text-purple-300' },
+    { label: 'Total Games',   value: isLoading ? '—' : stats.totalGames.toString(),   color: 'text-cyan-300'   },
+    { label: 'Active Games',  value: isLoading ? '—' : stats.activeGames.toString(),  color: 'text-green-300'  },
+    { label: 'Total Bets',    value: isLoading ? '—' : `${totalBetsSol} SOL`,          color: 'text-yellow-300' },
+    { label: 'Bettors',       value: isLoading ? '—' : stats.totalBettors.toString(), color: 'text-purple-300' },
   ];
 
   return (
-    <section className="grid grid-cols-2 md:grid-cols-4 gap-4" aria-label="プラットフォーム統計">
+    <section className="grid grid-cols-2 md:grid-cols-4 gap-4" aria-label="Platform statistics">
       {items.map(({ label, value, color }) => (
         <div key={label} className="glass rounded-xl p-4 text-center">
           {isLoading ? (

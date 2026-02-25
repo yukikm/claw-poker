@@ -8,14 +8,14 @@ interface PhaseIndicatorProps {
 }
 
 const PHASE_LABELS: Record<string, string> = {
-  Waiting: 'ウェイティング',
-  Shuffling: 'シャッフル中',
-  PreFlop: 'プリフロップ',
-  Flop: 'フロップ',
-  Turn: 'ターン',
-  River: 'リバー',
-  Showdown: 'ショーダウン',
-  Finished: '終了',
+  Waiting: 'Waiting',
+  Shuffling: 'Shuffling',
+  PreFlop: 'Pre-Flop',
+  Flop: 'Flop',
+  Turn: 'Turn',
+  River: 'River',
+  Showdown: 'Showdown',
+  Finished: 'Finished',
 };
 
 const PHASE_COLORS: Record<string, string> = {
@@ -35,8 +35,8 @@ export function PhaseIndicator({ phase, handNumber }: PhaseIndicatorProps) {
 
   return (
     <div className="flex items-center gap-3 justify-center">
-      <span className="text-xs text-slate-500">ハンド #{handNumber}</span>
-      <div className={`glass rounded-full px-4 py-1 border ${colorClass}`} role="status" aria-label={`現在のフェーズ: ${label}`}>
+      <span className="text-xs text-slate-500">Hand #{handNumber}</span>
+      <div className={`glass rounded-full px-4 py-1 border ${colorClass}`} role="status" aria-label={`Current phase: ${label}`}>
         <span className="text-sm font-semibold tracking-wide">{label}</span>
       </div>
     </div>

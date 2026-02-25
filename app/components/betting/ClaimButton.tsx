@@ -24,9 +24,9 @@ export function ClaimButton({ gameId, bettingPoolPda, betRecordPda, estimatedPay
         onClick={handleClaim}
         disabled={isLoading}
         className="w-full glass-cyan rounded-lg py-3 text-sm font-semibold text-cyan-300 hover:text-white hover:shadow-neon-cyan transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        aria-label={`報酬 ${formatSol(estimatedPayout)} SOL をクレーム`}
+        aria-label={`Claim reward ${formatSol(estimatedPayout)} SOL`}
       >
-        {isLoading ? 'クレーム中...' : `${formatSol(estimatedPayout)} SOL をクレーム`}
+        {isLoading ? 'Claiming...' : `Claim ${formatSol(estimatedPayout)} SOL`}
       </button>
       {error && <p className="text-xs text-red-400 text-center" role="alert">{error}</p>}
     </div>

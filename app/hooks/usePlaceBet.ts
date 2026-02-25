@@ -9,42 +9,42 @@ import { useMyBetsStore } from '@/stores/myBetsStore';
 import { type MyBet } from '@/lib/types';
 
 const ANCHOR_ERROR_MESSAGES: Record<number, string> = {
-  6000: 'ゲームが開始されていません。',
-  6001: 'ベッティングは締め切られています。',
-  6002: '残高不足です。',
-  6003: '既にベット済みです。',
-  6004: '無効なプレイヤー選択です。',
-  6005: 'ベット額が不正です。',
+  6000: 'Game has not started.',
+  6001: 'Betting is closed.',
+  6002: 'Insufficient balance.',
+  6003: 'Already placed a bet.',
+  6004: 'Invalid player selection.',
+  6005: 'Invalid bet amount.',
 };
 
 function sanitizeError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
 
-  // Anchorカスタムエラーコード（例: "custom program error: 0x1770"）
+  // Anchor custom error code (e.g. "custom program error: 0x1770")
   const hexMatch = message.match(/custom program error: 0x([0-9a-fA-F]+)/);
   if (hexMatch) {
     const code = parseInt(hexMatch[1], 16);
     if (ANCHOR_ERROR_MESSAGES[code]) return ANCHOR_ERROR_MESSAGES[code];
   }
 
-  // "Error Code: <number>" 形式
+  // "Error Code: <number>" format
   const codeMatch = message.match(/Error Code: (\d+)/);
   if (codeMatch) {
     const code = parseInt(codeMatch[1], 10);
     if (ANCHOR_ERROR_MESSAGES[code]) return ANCHOR_ERROR_MESSAGES[code];
   }
 
-  // 残高不足のSystemProgramエラー
+  // SystemProgram insufficient funds error
   if (message.includes('insufficient funds') || message.includes('Insufficient funds')) {
-    return '残高不足です。';
+    return 'Insufficient balance.';
   }
 
-  // ユーザーがトランザクションを拒否した場合
+  // User rejected transaction
   if (message.includes('User rejected')) {
-    return 'トランザクションがキャンセルされました。';
+    return 'Transaction cancelled.';
   }
 
-  return 'ベットの処理に失敗しました。もう一度お試しください。';
+  return 'Failed to place bet. Please try again.';
 }
 
 interface PlaceBetParams {
@@ -66,7 +66,7 @@ export function usePlaceBet() {
 
   const placeBet = async ({ gameId, gamePda, bettingPoolPda, playerChoice, amount }: PlaceBetParams): Promise<string | null> => {
     if (!publicKey || !program) {
-      setError('ウォレットを接続してください');
+      setError('Please connect your wallet');
       return null;
     }
 

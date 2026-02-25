@@ -103,6 +103,10 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
             phase == GamePhase::Waiting,
             PokerError::InvalidAction
         );
+        // 中間チェックポイント前にホールカードを確実にクリア（プライバシー保護）
+        // settle_handでクリア済みのはずだが、L1コミット前に念のため確実に消去する
+        ctx.accounts.player1_state.hole_cards = [255u8; 2];
+        ctx.accounts.player2_state.hole_cards = [255u8; 2];
         let account_infos = vec![
             ctx.accounts.game.as_ref(),
             ctx.accounts.player1_state.as_ref(),

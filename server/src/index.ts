@@ -8,7 +8,7 @@ import { GameMonitor, DecodedGameState } from './gameMonitor';
 import { AnchorClient, ActionType } from './anchorClient';
 import { SignatureStore } from './signatureStore';
 import { createX402Router } from './x402Handler';
-import { QueueJoinedMessage, GameJoinedMessage, ServerMessage, OpponentActionMessage, CommunityCardsRevealedMessage, HandCompleteMessage, HandHistoryEntry } from './types';
+import { QueueJoinedMessage, GameJoinedMessage, ServerMessage, GameStateMessage, OpponentActionMessage, CommunityCardsRevealedMessage, HandCompleteMessage, HandHistoryEntry } from './types';
 
 config();
 
@@ -19,6 +19,10 @@ const MAGICBLOCK_ER_URL = process.env.MAGICBLOCK_ER_URL ?? 'https://devnet.magic
 
 /** デフォルト参加費 (0.1 SOL in lamports) */
 const DEFAULT_ENTRY_FEE = 100_000_000;
+/** ゲーム開始時の各プレイヤーチップ枚数 */
+const STARTING_CHIPS = 1000;
+/** ブラインド額 */
+const BLINDS = { small: 10, big: 20 } as const;
 
 /** マッチングキューのエントリー */
 interface QueueEntry {
@@ -48,6 +52,25 @@ const prevGameStates = new Map<string, DecodedGameState>();
 
 /** 現在のハンド内のアクション履歴（gameId → アクション配列） */
 const currentHandActions = new Map<string, HandHistoryEntry[]>();
+
+/**
+ * 各ハンド開始時点のチップスタック（gameId → { p1, p2 }）。
+ * ショーダウン勝者をチップ差分から判定するために使用する。
+ * game.player1_chip_stack / player2_chip_stack はsettle_handでのみ更新されるため、
+ * 各ハンド開始（handNumber変化）時点の値がそのハンド中は不変となる。
+ */
+const handStartChips = new Map<string, { p1: number; p2: number }>();
+
+/**
+ * ショーダウン時のホールカード（gameId → { p1, p2 }）。
+ * reveal_showdown_cards 命令でゲームアカウントに書き込まれたカードをキャプチャし、
+ * settle_hand でクリアされる前にここへ保存する。
+ * hand_complete メッセージのshowdownフィールドに使用する。
+ */
+const capturedShowdownCards = new Map<
+  string,
+  { p1: [string, string]; p2: [string, string]; communityCards: string[] }
+>();
 
 const matchmakingQueue: QueueEntry[] = [];
 
@@ -202,16 +225,23 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       currentHandActions.set(gameIdStr, actions);
     }
 
-    // prevGameStatesから現在の状態を取得（直前のGameMonitor更新値）
-    const prevState = prevGameStates.get(gameIdStr);
+    // アクション後のER上の最新状態を取得（action_accepted/opponent_actionに正確な値を使用）
+    const postActionState = await anchorClient.fetchGamePotAndStacks(gameId);
     const isP1 = activeGames.get(gameId)?.player1Wallet === walletAddress;
+    // フォールバック: ER読み取り失敗時はprevGameStates（古いがnullよりマシ）
+    const fallbackState = prevGameStates.get(gameIdStr);
+    const newPot = postActionState?.pot ?? fallbackState?.pot ?? 0;
+    const myStack = postActionState
+      ? (isP1 ? postActionState.player1ChipStack : postActionState.player2ChipStack)
+      : (fallbackState ? (isP1 ? fallbackState.player1ChipStack : fallbackState.player2ChipStack) : 0);
+
     agentHandler.sendToAgent(walletAddress, {
       type: 'action_accepted',
       gameId: gameIdStr,
       action,
       amount: amount ?? null,
-      newPot: prevState?.pot ?? 0,
-      myStack: prevState ? (isP1 ? prevState.player1ChipStack : prevState.player2ChipStack) : 0,
+      newPot,
+      myStack,
     });
 
     // 相手プレイヤーにアクション通知
@@ -220,17 +250,17 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       const opponentWallet = activeGameForAction.player1Wallet === walletAddress
         ? activeGameForAction.player2Wallet
         : activeGameForAction.player1Wallet;
-      const prevStateForOpp = prevGameStates.get(gameIdStr);
       const isActingP1 = activeGameForAction.player1Wallet === walletAddress;
+      const opponentStack = postActionState
+        ? (isActingP1 ? postActionState.player2ChipStack : postActionState.player1ChipStack)
+        : (fallbackState ? (isActingP1 ? fallbackState.player2ChipStack : fallbackState.player1ChipStack) : 0);
       const oppMsg: OpponentActionMessage = {
         type: 'opponent_action',
         gameId: gameIdStr,
         action,
         amount: amount ?? null,
-        newPot: prevStateForOpp?.pot ?? 0,
-        opponentStack: prevStateForOpp
-          ? (isActingP1 ? prevStateForOpp.player1ChipStack : prevStateForOpp.player2ChipStack)
-          : 0,
+        newPot,
+        opponentStack,
       };
       agentHandler.sendToAgent(opponentWallet, oppMsg);
     }
@@ -242,6 +272,44 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       message: `Failed to submit action: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
+});
+
+// ─── 再接続ハンドラ: 切断前にゲーム中だったエージェントにゲーム状態を再送信 ──
+
+agentHandler.setOnReconnect(async (walletAddress: string, gameId: string) => {
+  const gameIdBigInt = BigInt(gameId);
+  const activeGame = activeGames.get(gameIdBigInt);
+  if (!activeGame) return;
+
+  const currentState = prevGameStates.get(gameId);
+  if (!currentState) return;
+
+  const isPlayer1 = walletAddress === activeGame.player1Wallet;
+  const isPlayer2 = walletAddress === activeGame.player2Wallet;
+  if (!isPlayer1 && !isPlayer2) return;
+
+  const myStack = isPlayer1 ? currentState.player1ChipStack : currentState.player2ChipStack;
+  const opponentStack = isPlayer1 ? currentState.player2ChipStack : currentState.player1ChipStack;
+  const isMyTurn = currentState.currentTurn === walletAddress;
+
+  console.log(`[Reconnect] ${walletAddress} reconnected to game ${gameId}, phase: ${currentState.phase}`);
+
+  // 現在のゲーム状態を再送信
+  const gameStateMsg: GameStateMessage = {
+    type: 'game_state',
+    gameId,
+    phase: currentState.phase,
+    handNumber: currentState.handNumber,
+    myStack,
+    opponentStack,
+    pot: currentState.pot,
+    communityCards: currentState.boardCards,
+    currentSmallBlind: currentState.currentSmallBlind,
+    currentBigBlind: currentState.currentBigBlind,
+    dealerPosition: currentState.dealerPosition === 0 ? 'player1' : 'player2',
+    isMyTurn,
+  };
+  agentHandler.sendToAgent(walletAddress, gameStateMsg);
 });
 
 // ─── マッチングロジック ──────────────────────────────────────────────────────
@@ -258,8 +326,8 @@ async function tryMatchPlayers(): Promise<void> {
     const gameId = BigInt(Date.now()) * 65536n + rndSuffix;
     const buyIn = BigInt(Math.min(player1Entry.entryFeeAmount, player2Entry.entryFeeAmount));
     const totalPot = player1Entry.entryFeeAmount + player2Entry.entryFeeAmount;
-    const startingChips = 1000;
-    const blinds = { small: 10, big: 20 };
+    const startingChips = STARTING_CHIPS;
+    const blinds = BLINDS;
 
     // ゲーム情報を記録
     activeGames.set(gameId, {
@@ -270,6 +338,9 @@ async function tryMatchPlayers(): Promise<void> {
     });
 
     const gameIdStr = gameId.toString();
+
+    // ハンド開始チップを初期値で初期化（ショーダウン勝者判定用）
+    handStartChips.set(gameIdStr, { p1: startingChips, p2: startingChips });
 
     // 両プレイヤーに通知
     const p1Msg: GameJoinedMessage = {
@@ -409,6 +480,17 @@ async function onGameStateUpdate(
     }
   }
 
+  // ショーダウンカードのキャプチャ
+  // reveal_showdown_cards命令実行後、game.showdown_cards_p1/p2が設定される。
+  // settle_hand命令でクリアされる前にここでキャプチャしてサーバーメモリに保存する。
+  if (state.showdownCardsP1 && state.showdownCardsP2) {
+    capturedShowdownCards.set(gameIdStr, {
+      p1: state.showdownCardsP1,
+      p2: state.showdownCardsP2,
+      communityCards: [...state.boardCards],
+    });
+  }
+
   // 50ハンドチェックポイント自動コミット
   // settle_handでlast_checkpoint_handが更新された（値が変化した）タイミングでcommit_gameを呼び出す
   if (
@@ -417,9 +499,7 @@ async function onGameStateUpdate(
     state.phase === 'Waiting'
   ) {
     console.log(`[Checkpoint] Game ${gameIdStr}: hand ${state.handNumber}, checkpoint at ${state.lastCheckpointHand}`);
-    anchorClient.commitGameCheckpoint(gameId).catch((err) => {
-      console.error(`[Checkpoint] Failed to commit checkpoint for game ${gameIdStr}:`, err);
-    });
+    void commitWithRetry(gameId, gameIdStr, 3);
   }
 
   // ハンド完了通知（hand_number が増加した時）
@@ -432,11 +512,43 @@ async function onGameStateUpdate(
     let handReason: 'showdown' | 'opponent_fold' | 'timeout' = 'showdown';
     if (prevP1Folded) { handWinner = 'player2'; handReason = 'opponent_fold'; }
     else if (prevP2Folded) { handWinner = 'player1'; handReason = 'opponent_fold'; }
+    else {
+      // ショーダウン: game.player1_chip_stack（settle_handでのみ更新）を
+      // ハンド開始前のスタックと比較して勝者を判定する。
+      // prevState = settle_hand後の状態（pot配分済み、committed=0）
+      const starts = handStartChips.get(gameIdStr);
+      if (starts) {
+        if (prevState.player2ChipStack > starts.p2) handWinner = 'player2';
+        // else handWinner は 'player1' のまま（p1勝利またはタイ）
+      }
+    }
+    // 次ハンドのhandStartChipsを更新（settle_hand後のスタックを記録）
+    handStartChips.set(gameIdStr, {
+      p1: prevState.player1ChipStack,
+      p2: prevState.player2ChipStack,
+    });
+
+    // キャプチャ済みショーダウンカードを取得してクリア
+    const captured = capturedShowdownCards.get(gameIdStr);
+    capturedShowdownCards.delete(gameIdStr);
 
     [player1Wallet, player2Wallet].forEach((wallet) => {
       const isP1 = wallet === player1Wallet;
       const myStack = isP1 ? state.player1ChipStack : state.player2ChipStack;
       const opponentStack = isP1 ? state.player2ChipStack : state.player1ChipStack;
+
+      // ショーダウン時のみshowdownInfoを設定（フォールドまたはタイムアウトの場合はnull）
+      let showdownInfo: import('./types').ShowdownInfo | null = null;
+      if (handReason === 'showdown' && captured) {
+        showdownInfo = {
+          myHand: isP1 ? captured.p1 : captured.p2,
+          opponentHand: isP1 ? captured.p2 : captured.p1,
+          communityCards: captured.communityCards,
+          myBestHand: '',
+          opponentBestHand: '',
+        };
+      }
+
       const handMsg: HandCompleteMessage = {
         type: 'hand_complete',
         gameId: gameIdStr,
@@ -446,7 +558,7 @@ async function onGameStateUpdate(
         potAwarded: prevState.pot,
         myStack,
         opponentStack,
-        showdown: null,
+        showdown: showdownInfo,
         reason: handReason,
       };
       agentHandler.sendToAgent(wallet, handMsg);
@@ -458,8 +570,9 @@ async function onGameStateUpdate(
     return;
   }
 
-  // ターン変更時にyour_turnを送信
-  if (isPlayer1Turn || isPlayer2Turn) {
+  // ターン変更時のみyour_turnを送信（重複送信防止）
+  const turnChanged = prevState?.currentTurn !== state.currentTurn;
+  if ((isPlayer1Turn || isPlayer2Turn) && turnChanged) {
     const activeWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
     const myStack = isPlayer1Turn ? state.player1ChipStack : state.player2ChipStack;
     const opponentStack = isPlayer1Turn ? state.player2ChipStack : state.player1ChipStack;
@@ -534,6 +647,27 @@ async function onGameStateUpdate(
   prevGameStates.set(gameIdStr, state);
 }
 
+/**
+ * commitGameCheckpoint をリトライ付きで呼び出す。
+ * ネットワーク一時エラーに備えて最大 maxRetries 回リトライし、指数バックオフを適用する。
+ */
+async function commitWithRetry(gameId: bigint, gameIdStr: string, maxRetries: number): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await anchorClient.commitGameCheckpoint(gameId);
+      console.log(`[Checkpoint] Game ${gameIdStr}: committed (attempt ${attempt}/${maxRetries})`);
+      return;
+    } catch (err) {
+      console.error(`[Checkpoint] Game ${gameIdStr}: attempt ${attempt}/${maxRetries} failed:`, err);
+      if (attempt < maxRetries) {
+        // 指数バックオフ: 2s, 4s, ...
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000 * attempt));
+      }
+    }
+  }
+  console.error(`[Checkpoint] Game ${gameIdStr}: all ${maxRetries} attempts failed, skipping commit`);
+}
+
 function calculateValidActions(state: DecodedGameState, isPlayer1: boolean): string[] {
   const myCommitted = isPlayer1 ? state.player1Committed : state.player2Committed;
   const oppCommitted = isPlayer1 ? state.player2Committed : state.player1Committed;
@@ -577,6 +711,17 @@ async function handleGameComplete(
   const winnerWallet = state.winner === player1Wallet ? player1Wallet : player2Wallet;
   const winnerPosition = winnerWallet === player1Wallet ? 'player1' : 'player2';
 
+  // ER上の最終状態をL1にコミットしてからresolveGameを呼び出す
+  // commit_gameなしでresolveGameを呼ぶとER上の状態がL1に反映されないためゲームが解決できない
+  try {
+    await anchorClient.commitGameCheckpoint(gameId);
+    console.log(`[GameComplete] Game ${gameIdStr}: committed final state to L1`);
+  } catch (err) {
+    console.error(`[GameComplete] Failed to commit game ${gameIdStr} to L1:`, err);
+    // コミット失敗時はresolveGameも続行不可のため早期リターン
+    return;
+  }
+
   // resolve_gameを呼び出してpayoutを処理
   let payoutAmount = 0;
   let payoutSignature = '';
@@ -589,6 +734,21 @@ async function handleGameComplete(
     houseFee = result.fee;
   } catch (err) {
     console.error(`[GameComplete] Failed to resolve game ${gameIdStr}:`, err);
+  }
+
+  // ゲーム終了理由を特定
+  // タイムアウト没収（3連続タイムアウト）、切断、通常の勝負を区別する
+  let gameEndReason: 'opponent_eliminated' | 'disconnect' | 'timeout_forfeit' = 'opponent_eliminated';
+  const p1TimeoutsForfeit = (state.consecutiveTimeoutsP1 ?? 0) >= 3;
+  const p2TimeoutsForfeit = (state.consecutiveTimeoutsP2 ?? 0) >= 3;
+  if (p1TimeoutsForfeit || p2TimeoutsForfeit) {
+    gameEndReason = 'timeout_forfeit';
+  } else {
+    const p1Connected = agentHandler.isAgentConnected(player1Wallet);
+    const p2Connected = agentHandler.isAgentConnected(player2Wallet);
+    if (!p1Connected || !p2Connected) {
+      gameEndReason = 'disconnect';
+    }
   }
 
   // 両プレイヤーにゲーム終了通知
@@ -608,7 +768,7 @@ async function handleGameComplete(
       payoutAmount: isWinner ? payoutAmount : 0,
       payoutSignature: isWinner ? payoutSignature : '',
       houseFee,
-      reason: 'opponent_eliminated',
+      reason: gameEndReason,
     });
 
     agentHandler.setAgentGameId(wallet, null);
@@ -622,6 +782,8 @@ async function handleGameComplete(
   );
   prevGameStates.delete(gameIdStr);
   currentHandActions.delete(gameIdStr);
+  handStartChips.delete(gameIdStr);
+  capturedShowdownCards.delete(gameIdStr);
   activeGames.delete(gameId);
 }
 

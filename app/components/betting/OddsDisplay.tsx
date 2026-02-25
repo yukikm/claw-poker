@@ -11,8 +11,8 @@ interface OddsDisplayProps {
 export function OddsDisplay({ pool }: OddsDisplayProps) {
   if (!pool) {
     return (
-      <div className="glass rounded-xl p-4 text-center text-slate-500 text-sm animate-pulse" role="status" aria-label="オッズ読み込み中">
-        オッズ読み込み中...
+      <div className="glass rounded-xl p-4 text-center text-slate-500 text-sm animate-pulse" role="status" aria-label="Loading odds">
+        Loading odds...
       </div>
     );
   }
@@ -23,8 +23,8 @@ export function OddsDisplay({ pool }: OddsDisplayProps) {
   const pct2 = 100 - pct1;
 
   return (
-    <div className="glass rounded-xl p-4 space-y-3" aria-label="現在のオッズ">
-      <h3 className="text-xs text-slate-400 uppercase tracking-wider text-center">ベッティングオッズ</h3>
+    <div className="glass rounded-xl p-4 space-y-3" aria-label="Current odds">
+      <h3 className="text-xs text-slate-400 uppercase tracking-wider text-center">Betting Odds</h3>
 
       <div className="flex gap-3">
         <div className="flex-1 glass-cyan rounded-lg p-3 text-center">
@@ -54,12 +54,12 @@ export function OddsDisplay({ pool }: OddsDisplayProps) {
       </div>
 
       <p className="text-xs text-slate-500 text-center">
-        総ベット: {formatSol(total)} SOL ({pool.betCount}件)
+        Total bets: {formatSol(total)} SOL ({pool.betCount})
       </p>
 
       {pool.isClosed && (
         <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-center">
-          <span className="text-xs text-red-400 font-semibold">ベット締切済み</span>
+          <span className="text-xs text-red-400 font-semibold">Betting Closed</span>
         </div>
       )}
     </div>

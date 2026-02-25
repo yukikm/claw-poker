@@ -6,10 +6,10 @@ import { GameList } from '@/components/game/GameList';
 type FilterType = 'all' | 'bettable' | 'in_progress' | 'completed';
 
 const FILTER_OPTIONS: { value: FilterType; label: string }[] = [
-  { value: 'all', label: 'すべて' },
-  { value: 'bettable', label: 'ベット可能' },
-  { value: 'in_progress', label: '進行中' },
-  { value: 'completed', label: '完了済み' },
+  { value: 'all', label: 'All' },
+  { value: 'bettable', label: 'Bettable' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'Completed' },
 ];
 
 export default function GamesPage() {
@@ -19,11 +19,11 @@ export default function GamesPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">ゲーム一覧</h1>
-          <p className="text-slate-400 text-sm mt-1">AIエージェント同士の対戦を観戦・ベット</p>
+          <h1 className="text-2xl font-bold text-white">Games</h1>
+          <p className="text-slate-400 text-sm mt-1">Watch and bet on AI agent matches</p>
         </div>
 
-        <div className="flex gap-2 flex-wrap" role="group" aria-label="フィルター">
+        <div className="flex gap-2 flex-wrap" role="group" aria-label="Filter">
           {FILTER_OPTIONS.map(({ value, label }) => (
             <button
               key={value}

@@ -66,13 +66,13 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
     try {
       const program = getReadOnlyProgram(connection);
 
-      // Game と BettingPool を並列取得
+      // Fetch Game and BettingPool in parallel
       const [gameAccounts, poolAccounts] = await Promise.all([
         program.account.game.all(),
         program.account.bettingPool.all(),
       ]);
 
-      // gameId をキーに BettingPool データをマップ化
+      // Map BettingPool data by gameId
       const poolMap = new Map<string, { totalBets: number; betCount: number; isClosed: boolean }>();
       for (const { account } of poolAccounts) {
         const pool = account;
@@ -98,11 +98,11 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
           );
 
           const poolData = poolMap.get(game.gameId.toString());
-          // BettingPool が締め切り済み or game.betting_closed の場合はベット不可
+          // Betting not allowed if BettingPool is closed or game.betting_closed
           const isBettable =
             !bettingClosed &&
             !(poolData?.isClosed ?? false) &&
-            (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn');
+            (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn' || phase === 'River');
 
           return {
             gameId,
@@ -120,7 +120,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         }
       );
 
-      // 集計統計を計算
+      // Compute aggregate statistics
       const totalBetsLamports = Array.from(poolMap.values()).reduce((s, p) => s + p.totalBets, 0);
       const totalBettors = Array.from(poolMap.values()).reduce((s, p) => s + p.betCount, 0);
       const activeGames = games.filter((g) => IN_PROGRESS_PHASES.includes(g.phase)).length;
@@ -134,7 +134,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
       set({ games, stats, isLoading: false });
     } catch (err) {
       console.error('[gamesStore] fetchGames error:', err);
-      set({ error: 'ゲーム一覧の取得に失敗しました。しばらくしてから再試行してください。', isLoading: false });
+      set({ error: 'Failed to load games. Please try again later.', isLoading: false });
     }
   },
 
@@ -151,7 +151,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
     get().fetchGames(connection, programId);
     pollingInterval = setInterval(() => {
       get().fetchGames(connection, programId);
-    }, 30_000);
+    }, 10_000);
   },
 
   stopPolling: () => {

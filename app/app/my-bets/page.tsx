@@ -8,10 +8,10 @@ import { formatSol, formatTimestamp } from '@/lib/format';
 import Link from 'next/link';
 
 const STATUS_CONFIG = {
-  active: { label: '進行中', className: 'text-cyan-300 border-cyan-500/30' },
-  won: { label: '勝利 (クレーム可)', className: 'text-green-300 border-green-500/30' },
-  lost: { label: '敗北', className: 'text-red-400 border-red-500/30' },
-  claimed: { label: 'クレーム済', className: 'text-slate-400 border-slate-500/30' },
+  active: { label: 'Active', className: 'text-cyan-300 border-cyan-500/30' },
+  won: { label: 'Won (Claimable)', className: 'text-green-300 border-green-500/30' },
+  lost: { label: 'Lost', className: 'text-red-400 border-red-500/30' },
+  claimed: { label: 'Claimed', className: 'text-slate-400 border-slate-500/30' },
 };
 
 export default function MyBetsPage() {
@@ -30,8 +30,8 @@ export default function MyBetsPage() {
     return (
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="glass rounded-2xl p-12 text-center space-y-4">
-          <p className="text-slate-400 text-lg">マイベットを見るにはウォレットを接続してください</p>
-          <p className="text-slate-500 text-sm">ベット履歴はローカルに保存されます</p>
+          <p className="text-slate-400 text-lg">Connect your wallet to view your bets</p>
+          <p className="text-slate-500 text-sm">Bet history is stored locally</p>
         </div>
       </div>
     );
@@ -39,23 +39,23 @@ export default function MyBetsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      <h1 className="text-2xl font-bold text-white">マイベット</h1>
+      <h1 className="text-2xl font-bold text-white">My Bets</h1>
 
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-4">
         <div className="glass rounded-xl p-4 text-center">
           <p className="text-xl font-bold font-mono text-white">{bets.length}</p>
-          <p className="text-xs text-slate-500 mt-1">総ベット数</p>
+          <p className="text-xs text-slate-500 mt-1">Total Bets</p>
         </div>
         <div className="glass rounded-xl p-4 text-center">
           <p className="text-xl font-bold font-mono text-slate-300">{formatSol(totalBet)}</p>
-          <p className="text-xs text-slate-500 mt-1">総ベット額 (SOL)</p>
+          <p className="text-xs text-slate-500 mt-1">Total Wagered (SOL)</p>
         </div>
         <div className="glass rounded-xl p-4 text-center">
           <p className={`text-xl font-bold font-mono ${netPnl >= 0 ? 'text-green-300' : 'text-red-400'}`}>
             {netPnl >= 0 ? '+' : ''}{formatSol(netPnl)}
           </p>
-          <p className="text-xs text-slate-500 mt-1">損益 (SOL)</p>
+          <p className="text-xs text-slate-500 mt-1">P&amp;L (SOL)</p>
         </div>
       </div>
 
@@ -64,7 +64,7 @@ export default function MyBetsPage() {
         <section aria-labelledby="claimable-heading">
           <h2 id="claimable-heading" className="text-lg font-semibold text-green-300 mb-3 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" aria-hidden="true" />
-            クレーム可能 ({claimableBets.length}件)
+            Claimable ({claimableBets.length})
           </h2>
           <div className="space-y-3">
             {claimableBets.map((bet) => (
@@ -72,10 +72,10 @@ export default function MyBetsPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <Link href={`/games/${bet.gameId}`} className="text-sm font-mono text-cyan-400 hover:text-white">
-                      ゲーム #{bet.gameId}
+                      Game #{bet.gameId}
                     </Link>
                     <p className="text-sm text-slate-400">
-                      Player {bet.playerChoice} に {formatSol(bet.amount)} SOL
+                      Player {bet.playerChoice} — {formatSol(bet.amount)} SOL
                     </p>
                     <p className="text-xs text-slate-500">{formatTimestamp(bet.timestamp)}</p>
                   </div>
@@ -95,22 +95,22 @@ export default function MyBetsPage() {
       {/* Active bets */}
       {activeBets.length > 0 && (
         <section aria-labelledby="active-heading">
-          <h2 id="active-heading" className="text-lg font-semibold text-cyan-300 mb-3">進行中のベット</h2>
+          <h2 id="active-heading" className="text-lg font-semibold text-cyan-300 mb-3">Active Bets</h2>
           <div className="space-y-3">
             {activeBets.map((bet) => (
               <div key={bet.betRecordPda} className="glass rounded-xl p-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <Link href={`/games/${bet.gameId}`} className="text-sm font-mono text-cyan-400 hover:text-white">
-                      ゲーム #{bet.gameId}
+                      Game #{bet.gameId}
                     </Link>
                     <p className="text-sm text-slate-400">
-                      Player {bet.playerChoice} に {formatSol(bet.amount)} SOL
+                      Player {bet.playerChoice} — {formatSol(bet.amount)} SOL
                     </p>
                     <p className="text-xs text-slate-500">{formatTimestamp(bet.timestamp)}</p>
                   </div>
                   <span className="text-xs text-cyan-300 border border-cyan-500/30 rounded-full px-2 py-0.5">
-                    進行中
+                    Active
                   </span>
                 </div>
               </div>
@@ -122,7 +122,7 @@ export default function MyBetsPage() {
       {/* History */}
       {historicalBets.length > 0 && (
         <section aria-labelledby="history-heading">
-          <h2 id="history-heading" className="text-lg font-semibold text-slate-300 mb-3">ベット履歴</h2>
+          <h2 id="history-heading" className="text-lg font-semibold text-slate-300 mb-3">Bet History</h2>
           <div className="space-y-2">
             {historicalBets.map((bet) => {
               const config = STATUS_CONFIG[bet.status];
@@ -153,9 +153,9 @@ export default function MyBetsPage() {
 
       {bets.length === 0 && (
         <div className="glass rounded-2xl p-12 text-center space-y-3">
-          <p className="text-slate-400">まだベット履歴がありません</p>
+          <p className="text-slate-400">No bet history yet</p>
           <Link href="/games" className="inline-block glass-cyan rounded-lg px-6 py-2 text-sm text-cyan-300 hover:text-white transition-colors">
-            ゲームを見る
+            Browse Games
           </Link>
         </div>
       )}

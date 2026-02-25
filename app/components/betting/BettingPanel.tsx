@@ -28,7 +28,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
   const [validationError, setValidationError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  const isBettable = pool && !pool.isClosed && (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn');
+  const isBettable = pool && !pool.isClosed && (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn' || phase === 'River');
   const betLamports = Math.floor(parseFloat(betSol || '0') * LAMPORTS_PER_SOL);
 
   const { odds1, odds2 } = formatOdds(pool?.totalBetPlayer1 ?? 0, pool?.totalBetPlayer2 ?? 0);
@@ -42,15 +42,15 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
     setValidationError(null);
     if (!publicKey || !isBettable) return;
     if (isNaN(betLamports) || betLamports <= 0) {
-      setValidationError('有効なベット額を入力してください');
+      setValidationError('Please enter a valid bet amount');
       return;
     }
     if (betLamports < MIN_BET_LAMPORTS) {
-      setValidationError(`最小ベット額は ${MIN_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL です`);
+      setValidationError(`Minimum bet is ${MIN_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL`);
       return;
     }
     if (betLamports > MAX_BET_LAMPORTS) {
-      setValidationError(`最大ベット額は ${MAX_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL です`);
+      setValidationError(`Maximum bet is ${MAX_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL`);
       return;
     }
     setConfirming(true);
@@ -78,18 +78,18 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
 
       {!publicKey ? (
         <div className="glass rounded-xl p-4 text-center text-slate-400 text-sm">
-          ベットするにはウォレットを接続してください
+          Connect your wallet to place a bet
         </div>
       ) : !isBettable ? (
         <div className="glass rounded-xl p-4 text-center text-slate-400 text-sm">
-          {pool?.isClosed ? 'ベット締切済み' : 'ベット受付中ではありません'}
+          {pool?.isClosed ? 'Betting closed' : 'Betting not available'}
         </div>
       ) : (
         <div className="glass rounded-xl p-4 space-y-4">
-          <h3 className="text-sm text-slate-300 font-semibold">ベットを置く</h3>
+          <h3 className="text-sm text-slate-300 font-semibold">Place a Bet</h3>
 
           {/* Player selection */}
-          <div className="flex gap-2" role="group" aria-label="ベット対象のプレイヤーを選択">
+          <div className="flex gap-2" role="group" aria-label="Select player to bet on">
             {([1, 2] as const).map((p) => (
               <button
                 key={p}
@@ -110,7 +110,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
 
           {/* Bet amount */}
           <div>
-            <label htmlFor="bet-amount" className="text-xs text-slate-400">ベット額 (SOL)</label>
+            <label htmlFor="bet-amount" className="text-xs text-slate-400">Bet Amount (SOL)</label>
             <input
               id="bet-amount"
               type="number"
@@ -133,7 +133,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
               value={parseFloat(betSol) || MIN_BET_LAMPORTS / LAMPORTS_PER_SOL}
               onChange={(e) => setBetSol(e.target.value)}
               className="w-full h-1.5 rounded-full appearance-none bg-slate-700 accent-cyan-400 cursor-pointer"
-              aria-label="ベット額スライダー"
+              aria-label="Bet amount slider"
             />
             <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
               <span>{MIN_BET_LAMPORTS / LAMPORTS_PER_SOL} SOL</span>
@@ -142,7 +142,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
           </div>
 
           {/* Presets */}
-          <div className="flex gap-2" role="group" aria-label="ベット額プリセット">
+          <div className="flex gap-2" role="group" aria-label="Bet amount presets">
             {BET_PRESETS.map((sol) => (
               <button
                 key={sol}
@@ -157,7 +157,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
 
           {/* Payout estimate */}
           <div className="flex justify-between text-xs text-slate-500">
-            <span>予想配当</span>
+            <span>Est. Payout</span>
             <span className="text-green-300 font-mono">
               {estimatedPayout !== null ? `${formatSol(estimatedPayout, 4)} SOL` : '--'}
             </span>
@@ -172,7 +172,7 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
           )}
 
           {txSig && (
-            <p className="text-xs text-green-400" role="status">ベット成功！ TX: {txSig.slice(0, 8)}...</p>
+            <p className="text-xs text-green-400" role="status">Bet placed! TX: {txSig.slice(0, 8)}...</p>
           )}
 
           {confirming ? (
@@ -181,15 +181,15 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
                 onClick={() => setConfirming(false)}
                 className="flex-1 glass rounded-lg py-3 text-sm text-slate-400 hover:text-white transition-all duration-200 cursor-pointer"
               >
-                キャンセル
+                Cancel
               </button>
               <button
                 onClick={handleBet}
                 disabled={isLoading}
                 className="flex-1 glass-cyan rounded-lg py-3 text-sm font-semibold text-cyan-300 hover:text-white hover:shadow-neon-cyan transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label={`${betSol} SOLのベットを確定`}
+                aria-label={`Confirm ${betSol} SOL bet`}
               >
-                {isLoading ? '送信中...' : `${betSol} SOL 確定`}
+                {isLoading ? 'Submitting...' : `Confirm ${betSol} SOL`}
               </button>
             </div>
           ) : (
@@ -197,9 +197,9 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
               onClick={handleConfirm}
               disabled={isLoading || isNaN(betLamports) || betLamports < MIN_BET_LAMPORTS || betLamports > MAX_BET_LAMPORTS}
               className="w-full glass-cyan rounded-lg py-3 text-sm font-semibold text-cyan-300 hover:text-white hover:shadow-neon-cyan transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label={`Player ${playerChoice}に${betSol} SOLをベット`}
+              aria-label={`Bet ${betSol} SOL on Player ${playerChoice}`}
             >
-              {`Player ${playerChoice} に ${betSol} SOL ベット`}
+              {`Bet ${betSol} SOL on Player ${playerChoice}`}
             </button>
           )}
         </div>

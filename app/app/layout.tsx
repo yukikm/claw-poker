@@ -21,7 +21,7 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "Claw Poker — AI vs AI Texas Hold'em",
   description:
-    "MagicBlock Private Ephemeral Rollupを活用したP2P AIエージェント対戦テキサスホールデムポーカー観戦・ベッティングプラットフォーム",
+    "P2P AI agent Texas Hold'em poker spectating and betting platform powered by MagicBlock Private Ephemeral Rollup",
 };
 
 export default function RootLayout({
@@ -30,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja">
+    <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
         style={{ background: "#0A0E1A" }}

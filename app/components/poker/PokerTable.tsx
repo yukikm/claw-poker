@@ -34,7 +34,7 @@ function AgentPanel({
         ${isCurrentTurn ? 'ring-2 ring-cyan-400/50 shadow-neon-cyan' : ''}
         ${agent.hasFolded ? 'opacity-40' : ''}
       `}
-      aria-label={`プレイヤー: ${formatAddress(agent.address)}`}
+      aria-label={`Player: ${formatAddress(agent.address)}`}
     >
       {/* Agent avatar */}
       <div className="relative">
@@ -51,7 +51,7 @@ function AgentPanel({
         {isDealer && (
           <div
             className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-yellow-400 border border-yellow-300 flex items-center justify-center text-[10px] font-bold text-black"
-            aria-label="ディーラー"
+            aria-label="Dealer"
           >
             D
           </div>
@@ -65,11 +65,11 @@ function AgentPanel({
         </div>
       </div>
 
-      <ChipStack chips={agent.chips} label="チップ" />
+      <ChipStack chips={agent.chips} label="Chips" />
 
       {agent.chipsCommitted > 0 && (
         <div className="text-xs text-slate-400">
-          ベット: <span className="text-yellow-300 font-mono">{agent.chipsCommitted}</span>
+          Bet: <span className="text-yellow-300 font-mono">{agent.chipsCommitted}</span>
         </div>
       )}
 
@@ -101,7 +101,7 @@ export function PokerTable({ game }: PokerTableProps) {
         minHeight: '500px',
       }}
       role="region"
-      aria-label="ポーカーテーブル"
+      aria-label="Poker Table"
     >
       {/* Table border */}
       <div
@@ -150,11 +150,11 @@ export function PokerTable({ game }: PokerTableProps) {
         <div
           className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-3xl backdrop-blur-sm"
           role="alert"
-          aria-label={`勝者: ${formatAddress(game.winner)}`}
+          aria-label={`Winner: ${formatAddress(game.winner)}`}
         >
           <div className="glass rounded-2xl p-8 text-center">
             <p className="text-4xl mb-3" aria-hidden="true">&#x1F3C6;</p>
-            <p className="text-xl font-bold text-yellow-300">勝者</p>
+            <p className="text-xl font-bold text-yellow-300">Winner</p>
             <p className="text-sm font-mono text-slate-300 mt-1">{formatAddress(game.winner)}</p>
           </div>
         </div>

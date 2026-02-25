@@ -5,9 +5,6 @@ import { SOLANA_RPC_URL, SOLANA_WS_URL, MAGICBLOCK_ER_RPC_URL, MAGICBLOCK_ER_WS_
 const MAGICBLOCK_TEE_RPC = MAGICBLOCK_TEE_RPC_URL;
 const MAGICBLOCK_TEE_WSS = MAGICBLOCK_TEE_WS_URL;
 
-// Permission PDA導出
-const PERMISSION_PROGRAM_ID = new PublicKey('ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1');
-
 let connectionInstance: Connection | null = null;
 
 export function getConnection(): Connection {
@@ -59,13 +56,6 @@ export async function getTEEConnection(
       commitment: 'processed',
       wsEndpoint: `${MAGICBLOCK_TEE_WSS}?token=${token}`,
     }
-  );
-}
-
-export function findPermissionPda(permissionedAccount: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('permission:'), permissionedAccount.toBuffer()],
-    PERMISSION_PROGRAM_ID,
   );
 }
 
