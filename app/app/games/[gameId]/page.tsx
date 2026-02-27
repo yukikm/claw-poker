@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useMemo } from 'react';
+import { useMemo } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useGameSubscription } from '@/hooks/useGameSubscription';
 import { PokerTable } from '@/components/poker/PokerTable';
@@ -9,13 +9,13 @@ import { AgentInfo } from '@/components/game/AgentInfo';
 import { getProgramId } from '@/lib/anchor';
 
 interface PageProps {
-  params: Promise<{ gameId: string }>;
+  params: { gameId: string };
 }
 
 const PROGRAM_ID = getProgramId();
 
 export default function GameWatchPage({ params }: PageProps) {
-  const { gameId: gameIdStr } = use(params);
+  const { gameId: gameIdStr } = params;
 
   const { gameId, gamePda, bettingPoolPda } = useMemo(() => {
     const id = BigInt(gameIdStr);

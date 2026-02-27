@@ -6,11 +6,13 @@ use ephemeral_rollups_sdk::access_control::structs::{
     Member, MembersArgs,
     AUTHORITY_FLAG, TX_LOGS_FLAG,
 };
+use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use crate::state::{Game, PlayerState};
 
 fn create_permission_for_player<'info>(
     player_state: &Account<'info, PlayerState>,
     permission: &AccountInfo<'info>,
+    permission_program: &AccountInfo<'info>,
     payer: &Signer<'info>,
     system_program: &Program<'info, System>,
     player_key: Pubkey,
@@ -48,6 +50,7 @@ fn create_permission_for_player<'info>(
     anchor_lang::solana_program::program::invoke_signed(
         &ix,
         &[
+            permission_program.to_account_info(),
             player_state.to_account_info(),
             permission.to_account_info(),
             payer.to_account_info(),
@@ -66,6 +69,7 @@ pub fn handler_player1(ctx: Context<CreatePermissionPlayer1>, game_id: u64) -> R
     create_permission_for_player(
         &ctx.accounts.player_state,
         &ctx.accounts.permission,
+        &ctx.accounts.permission_program,
         &ctx.accounts.payer,
         &ctx.accounts.system_program,
         player_key,
@@ -82,6 +86,7 @@ pub fn handler_player2(ctx: Context<CreatePermissionPlayer2>, game_id: u64) -> R
     create_permission_for_player(
         &ctx.accounts.player_state,
         &ctx.accounts.permission,
+        &ctx.accounts.permission_program,
         &ctx.accounts.payer,
         &ctx.accounts.system_program,
         player_key,
@@ -105,6 +110,9 @@ pub struct CreatePermissionPlayer1<'info> {
     /// CHECK: MagicBlock Permission PDA
     #[account(mut)]
     pub permission: AccountInfo<'info>,
+    /// CHECK: MagicBlock Permission Program
+    #[account(address = PERMISSION_PROGRAM_ID)]
+    pub permission_program: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -130,6 +138,9 @@ pub struct CreatePermissionPlayer2<'info> {
     /// CHECK: MagicBlock Permission PDA
     #[account(mut)]
     pub permission: AccountInfo<'info>,
+    /// CHECK: MagicBlock Permission Program
+    #[account(address = PERMISSION_PROGRAM_ID)]
+    pub permission_program: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,

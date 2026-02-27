@@ -585,6 +585,10 @@
           "writable": true
         },
         {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
           "name": "payer",
           "writable": true,
           "signer": true
@@ -653,6 +657,10 @@
         {
           "name": "permission",
           "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
         },
         {
           "name": "payer",
@@ -746,6 +754,10 @@
         {
           "name": "permission",
           "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
         },
         {
           "name": "payer",

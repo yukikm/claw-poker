@@ -1,6 +1,5 @@
 'use client';
 
-import { use } from 'react';
 import Link from 'next/link';
 import { PublicKey } from '@solana/web3.js';
 import { useGameSubscription } from '@/hooks/useGameSubscription';
@@ -10,7 +9,7 @@ import { GameStatusBadge } from '@/components/game/GameStatusBadge';
 import { getProgramId } from '@/lib/anchor';
 
 interface PageProps {
-  params: Promise<{ gameId: string }>;
+  params: { gameId: string };
 }
 
 function getGamePda(gameId: bigint): PublicKey {
@@ -36,7 +35,7 @@ function getBettingPoolPda(gameId: bigint): PublicKey {
 }
 
 export default function BetPage({ params }: PageProps) {
-  const { gameId: gameIdStr } = use(params);
+  const { gameId: gameIdStr } = params;
   const gameId = BigInt(gameIdStr);
   const gamePda = getGamePda(gameId);
   const bettingPoolPda = getBettingPoolPda(gameId);

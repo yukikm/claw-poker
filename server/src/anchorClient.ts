@@ -23,7 +23,9 @@ const PLATFORM_TREASURY = new PublicKey(
 /** MagicBlock Delegation Program ID */
 const DELEGATION_PROG = new PublicKey('DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh');
 /** MagicBlock Permission Program ID */
-const PERMISSION_PROG = new PublicKey('PERMwfoGhaxc4V7SREhGEJrHjfMKMWBi9zfqRiAhmkd');
+const PERMISSION_PROG = new PublicKey(
+  process.env.MAGICBLOCK_PERMISSION_PROGRAM_ID ?? 'ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1',
+);
 /** MagicBlock TEE Validator (Devnet). 環境変数 MAGICBLOCK_VALIDATOR で上書き可能 */
 const VALIDATOR_PUBKEY = new PublicKey(
   process.env.MAGICBLOCK_VALIDATOR ?? 'FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA',
@@ -382,6 +384,7 @@ export class AnchorClient {
       .accounts({
         game: gamePda,
         permission: permissionGame,
+        permissionProgram: PERMISSION_PROG,
         payer: operatorPubkey,
         systemProgram: SystemProgram.programId,
       })
@@ -398,6 +401,7 @@ export class AnchorClient {
         playerState: player1StatePda,
         player: player1,
         permission: permissionP1,
+        permissionProgram: PERMISSION_PROG,
         payer: operatorPubkey,
         systemProgram: SystemProgram.programId,
         game: gamePda,
@@ -415,6 +419,7 @@ export class AnchorClient {
         playerState: player2StatePda,
         player: player2,
         permission: permissionP2,
+        permissionProgram: PERMISSION_PROG,
         payer: operatorPubkey,
         systemProgram: SystemProgram.programId,
         game: gamePda,

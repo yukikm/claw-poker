@@ -3,6 +3,7 @@ use ephemeral_rollups_sdk::access_control::instructions::{
     CreatePermission, CreatePermissionInstructionArgs,
 };
 use ephemeral_rollups_sdk::access_control::structs::MembersArgs;
+use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use crate::state::Game;
 
 pub fn handler(ctx: Context<CreatePermissionGame>, game_id: u64) -> Result<()> {
@@ -25,6 +26,7 @@ pub fn handler(ctx: Context<CreatePermissionGame>, game_id: u64) -> Result<()> {
     anchor_lang::solana_program::program::invoke_signed(
         &ix,
         &[
+            ctx.accounts.permission_program.to_account_info(),
             ctx.accounts.game.to_account_info(),
             ctx.accounts.permission.to_account_info(),
             ctx.accounts.payer.to_account_info(),
@@ -48,6 +50,9 @@ pub struct CreatePermissionGame<'info> {
     /// CHECK: MagicBlock Permission PDA（自動導出）
     #[account(mut)]
     pub permission: AccountInfo<'info>,
+    /// CHECK: MagicBlock Permission Program
+    #[account(address = PERMISSION_PROGRAM_ID)]
+    pub permission_program: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
