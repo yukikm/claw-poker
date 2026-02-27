@@ -28,7 +28,13 @@ export function createX402Router(
 
   // x402ミドルウェアを試みるが、パッケージ未インストール時はスキップ
   let middlewareApplied = false;
-  try {
+
+  // x402は solana:devnet を未サポート（getNetworkIdがリクエスト処理時にthrowしサーバーがクラッシュする）。
+  // devnet環境ではx402をスキップして無支払いキュー参加モードで動作させる。
+  const solanaNetwork = process.env.SOLANA_NETWORK ?? 'solana:devnet';
+  if (solanaNetwork.includes('devnet')) {
+    console.log('[x402] Devnet detected — payment middleware disabled (x402 does not support solana:devnet)');
+  } else try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { paymentMiddleware } = require('x402-express');
 
@@ -99,10 +105,15 @@ export function createX402Router(
   }
 
   if (!middlewareApplied) {
-    console.warn('⚠️  x402 middleware not active. Run: npm install x402-express @coinbase/x402');
+    if (solanaNetwork.includes('devnet')) {
+      console.warn('⚠️  x402 payment disabled on devnet. Queue join is free for testing.');
+    } else {
+      console.warn('⚠️  x402 middleware not active. Run: npm install x402-express @coinbase/x402');
+    }
   }
 
-  if (!middlewareApplied && process.env.NODE_ENV === 'production') {
+  // devnetではx402無しが正常動作なので production チェックをスキップする
+  if (!middlewareApplied && !solanaNetwork.includes('devnet') && process.env.NODE_ENV === 'production') {
     throw new Error(
       'x402-express must be installed in production. Run: npm install x402-express @coinbase/x402',
     );
