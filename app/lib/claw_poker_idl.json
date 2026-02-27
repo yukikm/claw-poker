@@ -522,34 +522,12 @@
           }
         },
         {
-          "name": "matchmaking_queue",
+          "name": "operator",
+          "docs": [
+            "オペレーター: x402で受け取ったSOLを保持し、GameVaultに転送する"
+          ],
           "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  116,
-                  99,
-                  104,
-                  109,
-                  97,
-                  107,
-                  105,
-                  110,
-                  103,
-                  95,
-                  113,
-                  117,
-                  101,
-                  117,
-                  101
-                ]
-              }
-            ]
-          }
+          "signer": true
         },
         {
           "name": "payer",
@@ -684,6 +662,29 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "game",
+          "docs": [
+            "Gameアカウント: operator pubkeyを読み取りACLに追加するために参照"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -754,6 +755,29 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "game",
+          "docs": [
+            "Gameアカウント: operator pubkeyを読み取りACLに追加するために参照"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1120,8 +1144,7 @@
           "signer": true
         },
         {
-          "name": "player",
-          "signer": true
+          "name": "player"
         },
         {
           "name": "player_state",
@@ -1210,8 +1233,7 @@
           "signer": true
         },
         {
-          "name": "player",
-          "signer": true
+          "name": "player"
         },
         {
           "name": "player_state",
@@ -1326,12 +1348,16 @@
         },
         {
           "name": "player",
-          "writable": true,
-          "signer": true
+          "docs": [
+            "プレイヤーアカウント（署名不要、operatorが代理で呼び出す）"
+          ]
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "operator",
+          "docs": [
+            "オペレーター（x402支払い検証後にキュー登録を行う権限者）"
+          ],
+          "signer": true
         }
       ],
       "args": [
@@ -1686,7 +1712,10 @@
           "signer": true
         },
         {
-          "name": "operator"
+          "name": "operator",
+          "docs": [
+            "オペレーターアカウント（アクセス制御用）"
+          ]
         },
         {
           "name": "system_program",
@@ -1744,8 +1773,13 @@
           }
         },
         {
-          "name": "player",
-          "writable": true,
+          "name": "player"
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "オペレーターが代理でキュー離脱を実行する"
+          ],
           "signer": true
         }
       ],
@@ -2202,6 +2236,9 @@
         },
         {
           "name": "game_vault",
+          "docs": [
+            "owner制約で明示し、直接lamport操作の正当性を保証する。"
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -2266,6 +2303,7 @@
         },
         {
           "name": "operator",
+          "writable": true,
           "signer": true
         }
       ],
@@ -3274,14 +3312,14 @@
           {
             "name": "head",
             "docs": [
-              "リングバッファのヘッド位置"
+              "リングバッファのヘッド位置（将来の最適化用、現在は未使用）"
             ],
             "type": "u8"
           },
           {
             "name": "tail",
             "docs": [
-              "リングバッファのテール位置"
+              "リングバッファのテール位置（将来の最適化用、現在は未使用）"
             ],
             "type": "u8"
           },
