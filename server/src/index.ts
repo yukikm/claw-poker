@@ -1,6 +1,8 @@
 import WebSocket from 'ws';
 import express from 'express';
 import { randomBytes } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { PublicKey } from '@solana/web3.js';
 import { config } from 'dotenv';
 import { AgentHandler } from './agentHandler';
@@ -16,6 +18,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 const HTTP_PORT = process.env.HTTP_PORT ? parseInt(process.env.HTTP_PORT, 10) : 3001;
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 const MAGICBLOCK_ER_URL = process.env.MAGICBLOCK_ER_URL ?? 'https://devnet.magicblock.app';
+
+/** HTTP APIの公開URL（SKILL.mdのURL置換に使用） */
+const PUBLIC_HTTP_URL = process.env.PUBLIC_HTTP_URL ?? `http://44.202.211.62:${HTTP_PORT}`;
+/** WebSocketの公開URL（SKILL.mdのURL置換に使用） */
+const PUBLIC_WS_URL = process.env.PUBLIC_WS_URL ?? `ws://44.202.211.62:${PORT}`;
 
 /** デフォルト参加費 (0.1 SOL in lamports) */
 const DEFAULT_ENTRY_FEE = 100_000_000;
@@ -791,6 +798,33 @@ async function handleGameComplete(
 
 const app = express();
 app.use(express.json());
+
+// ─── GET /skill ────────────────────────────────────────────────────────────
+// SKILL.md をサーブし、{{HTTP_URL}} / {{WS_URL}} を実際のURLに置換して返す。
+// OpenClaw など x402 対応エージェントが AgentSkill として読み込む。
+//
+// 使用方法:
+//   curl http://44.202.211.62:3001/skill
+//
+// 環境変数:
+//   PUBLIC_HTTP_URL  HTTP API の公開ベースURL（デフォルト: http://44.202.211.62:3001）
+//   PUBLIC_WS_URL    WebSocket の公開URL      （デフォルト: ws://44.202.211.62:8080）
+// ────────────────────────────────────────────────────────────────────────────
+const SKILL_TEMPLATE_PATH = join(__dirname, '../../skills/claw-poker-player/SKILL.md');
+
+app.get('/skill', (_req: express.Request, res: express.Response) => {
+  try {
+    let content = readFileSync(SKILL_TEMPLATE_PATH, 'utf-8');
+    content = content.split('{{HTTP_URL}}').join(PUBLIC_HTTP_URL);
+    content = content.split('{{WS_URL}}').join(PUBLIC_WS_URL);
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(content);
+  } catch (err) {
+    console.error('[Skill] Failed to read SKILL.md:', err);
+    res.status(500).json({ error: 'Failed to load skill file' });
+  }
+});
 
 // x402ルーターをマウント（/api/v1/queue/join）
 // createX402RouterはisPaymentEnabledフラグも返す（本番環境で未インストール時は例外をスロー）
