@@ -78,6 +78,10 @@ const capturedShowdownCards = new Map<
   string,
   { p1: [string, string]; p2: [string, string]; communityCards: string[] }
 >();
+/** Waiting状態でのハンド開始クランク重複実行を防ぐ（gameId → waiting時handNumber） */
+const waitingCrankExecutedAtHand = new Map<string, number>();
+/** 進行中クランク（gameId） */
+const waitingCrankInFlight = new Set<string>();
 
 const matchmakingQueue: QueueEntry[] = [];
 
@@ -462,6 +466,32 @@ async function onGameStateUpdate(
   const isPlayer1Turn = state.currentTurn === player1Wallet;
   const isPlayer2Turn = state.currentTurn === player2Wallet;
 
+  // Waiting状態: 次ハンド開始クランクを1回だけ実行
+  if (state.phase === 'Waiting') {
+    const alreadyExecutedAt = waitingCrankExecutedAtHand.get(gameIdStr);
+    if (!waitingCrankInFlight.has(gameIdStr) && alreadyExecutedAt !== state.handNumber) {
+      waitingCrankInFlight.add(gameIdStr);
+      try {
+        const isFirstHand = state.handNumber === 0;
+        if (!isFirstHand) {
+          await anchorClient.startNewHand(gameId);
+        }
+        const clientSeed = Math.floor(Math.random() * 256);
+        await anchorClient.requestShuffle(
+          gameId,
+          new PublicKey(player1Wallet),
+          new PublicKey(player2Wallet),
+          clientSeed,
+        );
+        waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
+      } catch (err) {
+        console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
+      } finally {
+        waitingCrankInFlight.delete(gameIdStr);
+      }
+    }
+  }
+
   // コミュニティカード公開通知（フェーズ変化時）
   if (prevState && prevState.phase !== state.phase) {
     const phaseRevealMap: Record<string, 'flop' | 'turn' | 'river'> = {
@@ -787,6 +817,8 @@ async function handleGameComplete(
     anchorClient.getL1Connection(),
     anchorClient.getERConnection(),
   );
+  waitingCrankExecutedAtHand.delete(gameIdStr);
+  waitingCrankInFlight.delete(gameIdStr);
   prevGameStates.delete(gameIdStr);
   currentHandActions.delete(gameIdStr);
   handStartChips.delete(gameIdStr);

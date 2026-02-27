@@ -30,6 +30,10 @@ const PERMISSION_PROG = new PublicKey(
 const VALIDATOR_PUBKEY = new PublicKey(
   process.env.MAGICBLOCK_VALIDATOR ?? 'FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA',
 );
+/** ephemeral-vrf-sdk::consts::DEFAULT_QUEUE */
+const DEFAULT_ORACLE_QUEUE = new PublicKey(
+  process.env.MAGICBLOCK_ORACLE_QUEUE ?? 'Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh',
+);
 
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in';
 
@@ -592,6 +596,62 @@ export class AnchorClient {
       .rpc();
 
     console.log(`[AnchorClient] Action ${action} for ${playerWallet.toBase58()} in game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * Waiting状態のゲームでディーラーボタンを進め、次ハンドの準備を行う。
+   */
+  async startNewHand(gameId: bigint): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    const txSig = await (this.erProgram.methods as unknown as {
+      startNewHand: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .startNewHand(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Started new hand for game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * VRFシャッフルを要求し、callback_dealでホールカード配布・PreFlop遷移を開始する。
+   */
+  async requestShuffle(
+    gameId: bigint,
+    player1Wallet: PublicKey,
+    player2Wallet: PublicKey,
+    clientSeed: number,
+  ): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
+    const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    const txSig = await (this.erProgram.methods as unknown as {
+      requestShuffle: (gameId: BN, clientSeed: number) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .requestShuffle(new BN(gameId.toString()), clientSeed)
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
+        oracleQueue: DEFAULT_ORACLE_QUEUE,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Requested shuffle for game ${gameId}: ${txSig}`);
     return txSig;
   }
 
