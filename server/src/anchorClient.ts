@@ -202,11 +202,15 @@ export class AnchorClient {
     )[0];
   }
 
-  /** Delegation Buffer PDA: seeds = [b"buffer", account_pubkey] under PROGRAM_ID (owner program) */
-  private deriveDelegationBuffer(account: PublicKey): PublicKey {
+  /**
+   * Delegation Buffer PDA: seeds = [b"buffer", account_pubkey] under ownerProgramId.
+   * - claw-poker PDAs (game, player_state): ownerProgramId = PROGRAM_ID (default)
+   * - permission PDAs: ownerProgramId = PERMISSION_PROG
+   */
+  private deriveDelegationBuffer(account: PublicKey, ownerProgramId: PublicKey = PROGRAM_ID): PublicKey {
     return PublicKey.findProgramAddressSync(
       [Buffer.from('buffer'), account.toBuffer()],
-      PROGRAM_ID,
+      ownerProgramId,
     )[0];
   }
 
@@ -430,7 +434,77 @@ export class AnchorClient {
       })
       .rpc();
 
-    // Step 7: delegate_game（Game データアカウントを ER に委譲）
+    // Step 7: delegate_permission_game（Game Permission PDA を ER に委譲）
+    // ※ Permission委譲は account委譲より先に実行する必要がある。
+    //   account委譲後はgame/player_stateオーナーがDELEGATION_PROGに変わり、
+    //   Anchorのアカウント型チェックが失敗するため。
+    // ※ Permission PDAのバッファはowner_program = PERMISSION_PROGで導出する。
+    await (this.l1Program.methods as unknown as {
+      delegatePermissionGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePermissionGame(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        game: gamePda,
+        permission: permissionGame,
+        permissionProgram: PERMISSION_PROG,
+        validator: VALIDATOR_PUBKEY,
+        delegationBuffer: this.deriveDelegationBuffer(permissionGame, PERMISSION_PROG),
+        delegationRecord: this.deriveDelegationRecord(permissionGame),
+        delegationMetadata: this.deriveDelegationMetadata(permissionGame),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 8: delegate_permission_player1（Player1 Permission PDA を ER に委譲）
+    await (this.l1Program.methods as unknown as {
+      delegatePermissionPlayer1: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePermissionPlayer1(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        player: player1,
+        playerState: player1StatePda,
+        permission: permissionP1,
+        permissionProgram: PERMISSION_PROG,
+        validator: VALIDATOR_PUBKEY,
+        delegationBuffer: this.deriveDelegationBuffer(permissionP1, PERMISSION_PROG),
+        delegationRecord: this.deriveDelegationRecord(permissionP1),
+        delegationMetadata: this.deriveDelegationMetadata(permissionP1),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 9: delegate_permission_player2
+    await (this.l1Program.methods as unknown as {
+      delegatePermissionPlayer2: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .delegatePermissionPlayer2(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        player: player2,
+        playerState: player2StatePda,
+        permission: permissionP2,
+        permissionProgram: PERMISSION_PROG,
+        validator: VALIDATOR_PUBKEY,
+        delegationBuffer: this.deriveDelegationBuffer(permissionP2, PERMISSION_PROG),
+        delegationRecord: this.deriveDelegationRecord(permissionP2),
+        delegationMetadata: this.deriveDelegationMetadata(permissionP2),
+        delegationProgram: DELEGATION_PROG,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Step 10: delegate_game（Game データアカウントを ER に委譲）
+    // ※ Permission委譲完了後にアカウント委譲を実行する
     await (this.l1Program.methods as unknown as {
       delegateGame: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -450,7 +524,7 @@ export class AnchorClient {
       })
       .rpc();
 
-    // Step 8: delegate_player1（Player1State データアカウントを ER に委譲）
+    // Step 11: delegate_player1（Player1State データアカウントを ER に委譲）
     await (this.l1Program.methods as unknown as {
       delegatePlayer1: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -471,8 +545,8 @@ export class AnchorClient {
       })
       .rpc();
 
-    // Step 9: delegate_player2
-    await (this.l1Program.methods as unknown as {
+    // Step 12: delegate_player2
+    const txSig = await (this.l1Program.methods as unknown as {
       delegatePlayer2: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
       };
@@ -487,71 +561,6 @@ export class AnchorClient {
         buffer: this.deriveDelegationBuffer(player2StatePda),
         delegationRecord: this.deriveDelegationRecord(player2StatePda),
         delegationMetadata: this.deriveDelegationMetadata(player2StatePda),
-        delegationProgram: DELEGATION_PROG,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-
-    // Step 10: delegate_permission_game（Game Permission PDA を ER に委譲）
-    await (this.l1Program.methods as unknown as {
-      delegatePermissionGame: (gameId: BN) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .delegatePermissionGame(new BN(gameId.toString()))
-      .accounts({
-        payer: operatorPubkey,
-        game: gamePda,
-        permission: permissionGame,
-        permissionProgram: PERMISSION_PROG,
-        validator: VALIDATOR_PUBKEY,
-        delegationBuffer: this.deriveDelegationBuffer(permissionGame),
-        delegationRecord: this.deriveDelegationRecord(permissionGame),
-        delegationMetadata: this.deriveDelegationMetadata(permissionGame),
-        delegationProgram: DELEGATION_PROG,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-
-    // Step 11: delegate_permission_player1（Player1 Permission PDA を ER に委譲）
-    await (this.l1Program.methods as unknown as {
-      delegatePermissionPlayer1: (gameId: BN) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .delegatePermissionPlayer1(new BN(gameId.toString()))
-      .accounts({
-        payer: operatorPubkey,
-        player: player1,
-        playerState: player1StatePda,
-        permission: permissionP1,
-        permissionProgram: PERMISSION_PROG,
-        validator: VALIDATOR_PUBKEY,
-        delegationBuffer: this.deriveDelegationBuffer(permissionP1),
-        delegationRecord: this.deriveDelegationRecord(permissionP1),
-        delegationMetadata: this.deriveDelegationMetadata(permissionP1),
-        delegationProgram: DELEGATION_PROG,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-
-    // Step 12: delegate_permission_player2
-    const txSig = await (this.l1Program.methods as unknown as {
-      delegatePermissionPlayer2: (gameId: BN) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .delegatePermissionPlayer2(new BN(gameId.toString()))
-      .accounts({
-        payer: operatorPubkey,
-        player: player2,
-        playerState: player2StatePda,
-        permission: permissionP2,
-        permissionProgram: PERMISSION_PROG,
-        validator: VALIDATOR_PUBKEY,
-        delegationBuffer: this.deriveDelegationBuffer(permissionP2),
-        delegationRecord: this.deriveDelegationRecord(permissionP2),
-        delegationMetadata: this.deriveDelegationMetadata(permissionP2),
         delegationProgram: DELEGATION_PROG,
         systemProgram: SystemProgram.programId,
       })
