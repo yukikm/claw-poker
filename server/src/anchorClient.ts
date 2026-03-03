@@ -202,18 +202,18 @@ export class AnchorClient {
     )[0];
   }
 
-  /** Delegation Buffer PDA: seeds = [b"buffer", account_pubkey] under DELEGATION_PROG */
+  /** Delegation Buffer PDA: seeds = [b"buffer", account_pubkey] under PROGRAM_ID (owner program) */
   private deriveDelegationBuffer(account: PublicKey): PublicKey {
     return PublicKey.findProgramAddressSync(
       [Buffer.from('buffer'), account.toBuffer()],
-      DELEGATION_PROG,
+      PROGRAM_ID,
     )[0];
   }
 
-  /** Delegation Record PDA: seeds = [b"delegation-record", account_pubkey] under DELEGATION_PROG */
+  /** Delegation Record PDA: seeds = [b"delegation", account_pubkey] under DELEGATION_PROG */
   private deriveDelegationRecord(account: PublicKey): PublicKey {
     return PublicKey.findProgramAddressSync(
-      [Buffer.from('delegation-record'), account.toBuffer()],
+      [Buffer.from('delegation'), account.toBuffer()],
       DELEGATION_PROG,
     )[0];
   }
