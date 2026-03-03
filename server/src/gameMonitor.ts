@@ -69,6 +69,12 @@ export class GameMonitor {
 
     this.subscriptions.set(gameId, { l1Sub, erSub });
     console.log(`[GameMonitor] Watching game ${gameId}`);
+
+    // onAccountChange はアカウントの「変化」のみ通知し、初期状態は通知しない。
+    // ゲーム開始直後は Waiting のまま変化が発生しないため、クランクが起動しない。
+    // 購読直後に現在の状態を取得して onUpdate を呼ぶことで初回クランクを確実に起動する。
+    // ER へのデリゲーション直後は伝播に時間がかかる場合があるため最大3回リトライする。
+    void this.fetchInitialState(gameId, gamePda, erConnection, l1Connection, handleAccountChange);
   }
 
   unwatchGame(gameId: string, l1Connection: Connection, erConnection: Connection): void {
@@ -253,6 +259,43 @@ export class GameMonitor {
     } catch (err) {
       console.error('[GameMonitor] Decode error:', err);
       return null;
+    }
+  }
+
+  private async fetchInitialState(
+    gameId: string,
+    gamePda: PublicKey,
+    erConnection: Connection,
+    l1Connection: Connection,
+    handleAccountChange: (info: AccountInfo<Buffer>) => void,
+  ): Promise<void> {
+    const MAX_RETRIES = 4;
+    const RETRY_DELAY_MS = 1500;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const info = await erConnection.getAccountInfo(gamePda, 'confirmed');
+        if (info) {
+          handleAccountChange(info as AccountInfo<Buffer>);
+          return;
+        }
+        // ER に未反映の場合は L1 からフォールバック（デリゲーション完了前の可能性）
+        if (attempt === MAX_RETRIES) {
+          const l1Info = await l1Connection.getAccountInfo(gamePda, 'confirmed');
+          if (l1Info) {
+            handleAccountChange(l1Info as AccountInfo<Buffer>);
+          } else {
+            console.warn(`[GameMonitor] Game ${gameId}: account not found after ${MAX_RETRIES} retries`);
+          }
+          return;
+        }
+      } catch (err) {
+        if (attempt === MAX_RETRIES) {
+          console.error(`[GameMonitor] Failed to fetch initial state for game ${gameId}:`, err);
+          return;
+        }
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
   }
 

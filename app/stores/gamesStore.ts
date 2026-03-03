@@ -3,6 +3,7 @@ import { PublicKey, Connection } from '@solana/web3.js';
 import { type GameSummary } from '@/lib/types';
 import { type GamePhase } from '@/lib/constants';
 import { getReadOnlyProgram } from '@/lib/anchor';
+import { getERConnection } from '@/lib/solana';
 
 export interface GamesStats {
   totalGames: number;
@@ -64,13 +65,27 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
   fetchGames: async (connection: Connection, programId: PublicKey) => {
     set({ isLoading: true, error: null });
     try {
-      const program = getReadOnlyProgram(connection);
+      // ER をまず試し、取得できなければ L1 にフォールバック。
+      // デリゲーション後は ER がアクティブなゲームを保持し、L1 は完了ゲームや未デリゲートゲームを保持する。
+      const erConnection = getERConnection();
+      const erProgram = getReadOnlyProgram(erConnection);
+      const l1Program = getReadOnlyProgram(connection);
 
-      // Fetch Game and BettingPool in parallel
-      const [gameAccounts, poolAccounts] = await Promise.all([
-        program.account.game.all(),
-        program.account.bettingPool.all(),
+      const [erGameAccounts, l1GameAccounts, poolAccounts] = await Promise.all([
+        erProgram.account.game.all().catch(() => []),
+        l1Program.account.game.all().catch(() => []),
+        l1Program.account.bettingPool.all().catch(() => []),
       ]);
+
+      // ER と L1 のゲームをマージ（gameId をキーに重複排除。ER を優先）
+      const gameMap = new Map<string, typeof erGameAccounts[number]>();
+      for (const entry of l1GameAccounts) {
+        gameMap.set(entry.account.gameId.toString(), entry);
+      }
+      for (const entry of erGameAccounts) {
+        gameMap.set(entry.account.gameId.toString(), entry);
+      }
+      const gameAccounts = Array.from(gameMap.values());
 
       // Map BettingPool data by gameId
       const poolMap = new Map<string, { totalBets: number; betCount: number; isClosed: boolean }>();

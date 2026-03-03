@@ -154,10 +154,9 @@ export function createX402Router(
 
       res.json({ success: true, message: 'Queue joined successfully', walletAddress });
     } catch (err) {
-      console.error('[x402] enterMatchmakingQueue failed:', err);
-
       // 既にオンチェーンキューに存在する場合は、再参加の冪等リクエストとして扱う。
       // サーバー再起動などでメモリキューとオンチェーンキューがズレるケースを吸収する。
+      // このチェックをconsole.errorより先に行い、想定内のエラーを誤検知させない。
       const maybeAnchorErr = err as {
         error?: { errorCode?: { code?: string } };
       } | null;
@@ -174,6 +173,8 @@ export function createX402Router(
         });
         return;
       }
+
+      console.error('[x402] enterMatchmakingQueue failed:', err);
 
       // C-x402-2: エラー種別を区別し、「送信後結果不明」エラーでは返金をスキップする。
       // SendTransactionError / TransactionExpiredBlockheightExceededError は

@@ -228,18 +228,18 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
       );
     };
 
-    // ERコネクションでGameアカウントを監視
-    const gameSubId = erConnection.onAccountChange(
-      gamePda,
-      (accountInfo) => {
-        try {
-          const prevGame = get().game;
-          const rawGame = program.coder.accounts.decode('Game', Buffer.from(accountInfo.data));
-          set({ game: mapGameAccount(rawGame as Record<string, unknown>, gamePda, programId, prevGame) });
-        } catch (err) { console.error('[watchGameStore] Game decode error:', err); }
-      },
-      'confirmed'
-    );
+    const handleGameAccountChange = (accountInfo: import('@solana/web3.js').AccountInfo<Buffer>): void => {
+      try {
+        const prevGame = get().game;
+        const rawGame = program.coder.accounts.decode('Game', Buffer.from(accountInfo.data));
+        set({ game: mapGameAccount(rawGame as Record<string, unknown>, gamePda, programId, prevGame) });
+      } catch (err) { console.error('[watchGameStore] Game decode error:', err); }
+    };
+
+    // ERコネクションでGameアカウントを監視（ER にデリゲート済みの場合はリアルタイム更新）
+    const gameErSubId = erConnection.onAccountChange(gamePda, handleGameAccountChange, 'confirmed');
+    // L1コネクションでも監視（ER 未デリゲート時や undelegation 時の状態変化をキャッチ）
+    const gameL1SubId = connection.onAccountChange(gamePda, handleGameAccountChange, 'confirmed');
 
     // L1コネクションでBettingPoolを監視
     const poolSubId = connection.onAccountChange(
@@ -257,14 +257,16 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
 
     set({
       subscriptionEntries: [
-        { id: gameSubId, connection: erConnection },
+        { id: gameErSubId, connection: erConnection },
+        { id: gameL1SubId, connection },
         { id: poolSubId, connection },
       ],
     });
 
     // 初期状態を読み込み（Game + BettingPool のみ）
+    // ER にアカウントがない場合（デリゲーション伝播遅延・L1 のみ存在）は L1 にフォールバック
     Promise.all([
-      erConnection.getAccountInfo(gamePda),
+      erConnection.getAccountInfo(gamePda).then((info) => info ?? connection.getAccountInfo(gamePda)),
       connection.getAccountInfo(bettingPoolPda),
     ]).then(([gameInfo, poolInfo]) => {
       let gameState: GameState | null = null;
