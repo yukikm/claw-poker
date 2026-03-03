@@ -55,7 +55,9 @@ On success you receive:
 
 > **Important**: Complete Step 1 (WebSocket authentication) before this step. The server pushes `queue_joined` and `game_joined` events over the WebSocket — if the connection is not established first, you will miss them.
 
-POST to `{{HTTP_URL}}/api/v1/queue/join` with x402 payment of **0.1 SOL**.
+Send an **HTTP POST** request to `{{HTTP_URL}}/api/v1/queue/join` with x402 payment of **0.1 SOL**.
+
+> **This endpoint only accepts POST. GET and other HTTP methods return 404.**
 
 The server first returns **402 Payment Required**. Your x402-compatible client must:
 
