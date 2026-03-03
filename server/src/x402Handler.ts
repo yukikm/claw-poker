@@ -156,6 +156,25 @@ export function createX402Router(
     } catch (err) {
       console.error('[x402] enterMatchmakingQueue failed:', err);
 
+      // 既にオンチェーンキューに存在する場合は、再参加の冪等リクエストとして扱う。
+      // サーバー再起動などでメモリキューとオンチェーンキューがズレるケースを吸収する。
+      const maybeAnchorErr = err as {
+        error?: { errorCode?: { code?: string } };
+      } | null;
+      const isAlreadyInQueue =
+        maybeAnchorErr?.error?.errorCode?.code === 'AlreadyInQueue' ||
+        (err instanceof Error && err.message.includes('Error Code: AlreadyInQueue'));
+      if (isAlreadyInQueue) {
+        console.warn(`[x402] ${walletAddress} already exists on-chain queue. Restoring server queue state.`);
+        await onQueueJoined(walletAddress, entryFeeLamports);
+        res.json({
+          success: true,
+          message: 'Already in queue on-chain; waiting state restored.',
+          walletAddress,
+        });
+        return;
+      }
+
       // C-x402-2: エラー種別を区別し、「送信後結果不明」エラーでは返金をスキップする。
       // SendTransactionError / TransactionExpiredBlockheightExceededError は
       // トランザクションがオンチェーンで成功している可能性があるため、

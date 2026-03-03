@@ -165,23 +165,25 @@ agentHandler.setOnJoinQueue(async (walletAddress, entryFeeSignature, entryFeeAmo
 
 agentHandler.setOnLeaveQueue(async (walletAddress) => {
   const index = matchmakingQueue.findIndex((e) => e.walletAddress === walletAddress);
-  if (index === -1) return;
+  const entry = index !== -1 ? matchmakingQueue.splice(index, 1)[0] : null;
 
-  const entry = matchmakingQueue.splice(index, 1)[0];
-
-  // leave_matchmaking_queue Anchor命令を呼び出して返金する
-  let refundSignature = '';
+  // leave_matchmaking_queue Anchor命令を呼び出してオンチェーンQueueから削除する
+  let queueLeaveSignature = '';
   try {
     const playerPubkey = new PublicKey(walletAddress);
-    refundSignature = await anchorClient.leaveMatchmakingQueue(playerPubkey);
-    console.log(`[Queue] Refund for ${walletAddress} (${entry.entryFeeAmount} lamports): ${refundSignature}`);
+    queueLeaveSignature = await anchorClient.leaveMatchmakingQueue(playerPubkey);
+    if (entry) {
+      console.log(`[Queue] Removed ${walletAddress} (${entry.entryFeeAmount} lamports): ${queueLeaveSignature}`);
+    } else {
+      console.log(`[Queue] Removed stale on-chain entry for ${walletAddress}: ${queueLeaveSignature}`);
+    }
   } catch (err) {
-    console.error(`[Queue] Failed to refund ${walletAddress} (${entry.entryFeeAmount} lamports):`, err);
+    console.error(`[Queue] Failed to remove queue entry for ${walletAddress}:`, err);
   }
 
   agentHandler.sendToAgent(walletAddress, {
     type: 'queue_left',
-    refundSignature,
+    refundSignature: queueLeaveSignature,
   });
 });
 
@@ -403,6 +405,19 @@ async function initializeOnChainGame(
     await anchorClient.initializeGame(gameId, player1, player2, buyIn);
     console.log(`[OnChain] Game ${gameId} initialized on-chain`);
 
+    // マッチ成立後はオンチェーンQueueから双方を削除する。
+    // Queueは参加者トラッキング用途であり、残置すると次回join時にAlreadyInQueueになる。
+    await Promise.allSettled([
+      anchorClient.leaveMatchmakingQueue(player1),
+      anchorClient.leaveMatchmakingQueue(player2),
+    ]).then((results) => {
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          console.error(`[OnChain] Queue cleanup failed for player${i + 1} in game ${gameId}:`, r.reason);
+        }
+      });
+    });
+
     // GameMonitorでゲーム状態を監視開始
     const [gamePda] = anchorClient.deriveGamePda(gameId);
     gameMonitor.watchGame(
@@ -427,13 +442,13 @@ async function initializeOnChainGame(
     agentHandler.setAgentGameId(player1Entry.walletAddress, null);
     agentHandler.setAgentGameId(player2Entry.walletAddress, null);
 
-    // 参加費の返金を試みる（leave_matchmaking_queue 命令経由）
+    // オンチェーンQueueの残留エントリをクリーンアップする
     await Promise.allSettled([
       anchorClient.leaveMatchmakingQueue(player1).then((sig) => {
-        console.log(`[OnChain] Refunded ${player1.toBase58()}: ${sig}`);
+        console.log(`[OnChain] Queue entry removed for ${player1.toBase58()}: ${sig}`);
       }),
       anchorClient.leaveMatchmakingQueue(player2).then((sig) => {
-        console.log(`[OnChain] Refunded ${player2.toBase58()}: ${sig}`);
+        console.log(`[OnChain] Queue entry removed for ${player2.toBase58()}: ${sig}`);
       }),
     ]).then((results) => {
       results.forEach((r, i) => {
