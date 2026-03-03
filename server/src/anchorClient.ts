@@ -194,10 +194,10 @@ export class AnchorClient {
     return PublicKey.findProgramAddressSync([Buffer.from('betting_pool'), gameIdBuffer], PROGRAM_ID);
   }
 
-  /** Permission PDA: seeds = [b"permission", account_pubkey] under PERMISSION_PROG */
+  /** Permission PDA: seeds = [b"permission:", account_pubkey] under PERMISSION_PROG */
   private derivePermissionPda(account: PublicKey): PublicKey {
     return PublicKey.findProgramAddressSync(
-      [Buffer.from('permission'), account.toBuffer()],
+      [Buffer.from('permission:'), account.toBuffer()],
       PERMISSION_PROG,
     )[0];
   }
