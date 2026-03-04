@@ -91,7 +91,7 @@ pub struct RequestShuffle<'info> {
         bump = player2_state.bump,
     )]
     pub player2_state: Account<'info, PlayerState>,
-    /// CHECK: The oracle queue
-    #[account(mut, address = ephemeral_vrf_sdk::consts::DEFAULT_QUEUE)]
+    /// CHECK: The oracle queue (PER内実行のためEphemeral用キューを使用)
+    #[account(mut, address = ephemeral_vrf_sdk::consts::DEFAULT_EPHEMERAL_QUEUE)]
     pub oracle_queue: AccountInfo<'info>,
 }

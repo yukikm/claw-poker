@@ -9,7 +9,7 @@ import {
 import { AnchorProvider, Program, BN, Idl, Wallet } from '@coral-xyz/anchor';
 import * as path from 'path';
 import nacl from 'tweetnacl';
-import { encode as encodeBase58 } from 'bs58';
+import { getAuthToken } from '@magicblock-labs/ephemeral-rollups-sdk';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const IDL = require(path.join(__dirname, '../../app/lib/claw_poker_idl.json')) as Idl;
@@ -30,9 +30,9 @@ const PERMISSION_PROG = new PublicKey(
 const VALIDATOR_PUBKEY = new PublicKey(
   process.env.MAGICBLOCK_VALIDATOR ?? 'FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA',
 );
-/** ephemeral-vrf-sdk::consts::DEFAULT_QUEUE */
+/** ephemeral-vrf-sdk::consts::DEFAULT_EPHEMERAL_QUEUE（PER内実行用） */
 const DEFAULT_ORACLE_QUEUE = new PublicKey(
-  process.env.MAGICBLOCK_ORACLE_QUEUE ?? 'Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh',
+  process.env.MAGICBLOCK_ORACLE_QUEUE ?? '5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc',
 );
 
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in';
@@ -47,8 +47,16 @@ export interface ActiveGame {
   handNumber: number;
 }
 
+/** 有効なアクションの集合（ランタイム検証用） */
+const VALID_ACTIONS: ReadonlySet<string> = new Set<ActionType>([
+  'fold', 'check', 'call', 'bet', 'raise', 'all_in',
+]);
+
 /** Anchor VariantオブジェクトにPlayerActionを変換 */
 function toAnchorAction(action: ActionType): Record<string, Record<string, never>> {
+  if (!VALID_ACTIONS.has(action)) {
+    throw new Error(`Unknown action '${String(action)}'`);
+  }
   const map: Record<ActionType, string> = {
     fold: 'fold',
     check: 'check',
@@ -893,53 +901,26 @@ export class AnchorClient {
     }
 
     // 末尾スラッシュを除去してパス結合の二重スラッシュを防ぐ
-    // MAGICBLOCK_TEE_RPC_URL="https://tee.magicblock.app/" のような設定に対応
     const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
 
-    // TEE RPCにチャレンジを要求
-    const challengeRes = await fetch(
-      `${baseUrl}/auth/challenge?pubkey=${this.operatorKeypair.publicKey.toString()}`,
+    // 公式SDK getAuthToken() を使用（チャレンジ取得→署名→トークン交換を一括処理）
+    const secretKey = this.operatorKeypair.secretKey;
+    const authResult = await getAuthToken(
+      baseUrl,
+      this.operatorKeypair.publicKey,
+      (message: Uint8Array) => Promise.resolve(nacl.sign.detached(message, secretKey)),
     );
-    const challengeJson = await challengeRes.json() as { challenge?: string; error?: string };
-    if (challengeJson.error) {
-      throw new Error(`TEE challenge failed: ${challengeJson.error}`);
-    }
-    if (!challengeJson.challenge) {
-      throw new Error('TEE challenge: no challenge received');
-    }
 
-    // operatorKeypairでチャレンジに署名（ed25519 detached signature）
-    const challengeBytes = new Uint8Array(Buffer.from(challengeJson.challenge, 'utf-8'));
-    const signature = nacl.sign.detached(challengeBytes, this.operatorKeypair.secretKey);
-    const signatureBase58 = encodeBase58(signature);
+    const { token, expiresAt } = authResult;
 
-    // 認証トークンを取得
-    const authRes = await fetch(`${baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pubkey: this.operatorKeypair.publicKey.toString(),
-        challenge: challengeJson.challenge,
-        signature: signatureBase58,
-      }),
-    });
-    const authJson = await authRes.json() as { token?: string; expiresAt?: number; error?: string };
-    if (authRes.status !== 200 || !authJson.token) {
-      throw new Error(`TEE auth failed: ${authJson.error ?? 'no token received'}`);
-    }
-
-    // 30日デフォルト有効期限（MagicBlock SDK SESSION_DURATION準拠）
-    const expiresAt = authJson.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
-
-    // commitment は公式サンプル準拠で指定しない（providerレベルで制御）
     const teeConnection = new Connection(
-      `${baseUrl}?token=${authJson.token}`,
+      `${baseUrl}?token=${token}`,
       {
-        wsEndpoint: this.teeWsUrl ? `${this.teeWsUrl.replace(/\/+$/, '')}?token=${authJson.token}` : undefined,
+        wsEndpoint: this.teeWsUrl ? `${this.teeWsUrl.replace(/\/+$/, '')}?token=${token}` : undefined,
       },
     );
 
-    this.teeAuthCache = { token: authJson.token, expiresAt, connection: teeConnection };
+    this.teeAuthCache = { token, expiresAt, connection: teeConnection };
     console.log('[AnchorClient] TEE auth token acquired, expires:', new Date(expiresAt).toISOString());
     return teeConnection;
   }
@@ -968,8 +949,11 @@ export class AnchorClient {
       this.cachedTeeProgram = { program, token: currentToken };
       return program;
     } catch (err) {
-      console.warn('[AnchorClient] TEE program creation failed, falling back to erProgram:', err);
-      return this.erProgram;
+      // TEE認証失敗時、ゲームアカウントはプライベートER上にのみ存在するため
+      // 公開ERへのフォールバックは書き込みトランザクションを確実に失敗させる。
+      // ただしTEEが一時的に利用不可の場合にサーバーがクラッシュしないようエラーを伝搬する。
+      console.error('[AnchorClient] TEE program creation failed (no fallback for writes):', err);
+      throw new Error(`TEE connection required for write operations but unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -1002,9 +986,21 @@ export class AnchorClient {
     if (!this.teeRpcUrl) return null;
     const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
     const res = await fetch(`${baseUrl}/auth/challenge?pubkey=${playerPubkey.toString()}`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`TEE challenge HTTP ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/json')) {
+      const body = await res.text();
+      throw new Error(`TEE challenge returned non-JSON (${contentType}): ${body.slice(0, 200)}`);
+    }
     const json = await res.json() as { challenge?: string; error?: string };
+    if (json.error) {
+      throw new Error(`TEE challenge for player failed: ${json.error}`);
+    }
     if (!json.challenge) {
-      throw new Error(`TEE challenge for player failed: ${json.error ?? 'no challenge'}`);
+      throw new Error('TEE challenge for player: no challenge received');
     }
     return json.challenge;
   }
@@ -1030,8 +1026,17 @@ export class AnchorClient {
         signature: signatureBase58,
       }),
     });
+    if (!authRes.ok) {
+      const body = await authRes.text();
+      throw new Error(`TEE player login HTTP ${authRes.status}: ${body.slice(0, 200)}`);
+    }
+    const authContentType = authRes.headers.get('content-type') ?? '';
+    if (!authContentType.includes('application/json')) {
+      const body = await authRes.text();
+      throw new Error(`TEE player login returned non-JSON (${authContentType}): ${body.slice(0, 200)}`);
+    }
     const authJson = await authRes.json() as { token?: string; expiresAt?: number; error?: string };
-    if (authRes.status !== 200 || !authJson.token) {
+    if (!authJson.token) {
       throw new Error(`TEE player auth failed: ${authJson.error ?? 'no token'}`);
     }
     const expiresAt = authJson.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;

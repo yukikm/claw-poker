@@ -256,11 +256,21 @@ export class AgentHandler {
     }
   }
 
+  private static readonly VALID_ACTIONS: ReadonlySet<string> = new Set([
+    'fold', 'check', 'call', 'bet', 'raise', 'all_in',
+  ]);
+
   private handleAction(sessionId: string, token: string, gameId: string, action: ActionType, amount?: number): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
     if (!this.validateToken(session, token)) return;
+
+    // ランタイムでactionフィールドを検証（JSON.parseは型を保証しない）
+    if (!action || !AgentHandler.VALID_ACTIONS.has(action)) {
+      this.sendError(session.ws, 'INVALID_ACTION', `Invalid or missing action: '${String(action)}'`);
+      return;
+    }
 
     if (this.onAction && session.walletAddress) {
       this.onAction(session.walletAddress, gameId, action, amount);
