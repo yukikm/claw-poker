@@ -145,6 +145,17 @@ export interface PongMessage {
   serverTime: number;
 }
 
+/**
+ * TEEチャレンジをプレイヤーに送信する（Private ER プライバシーモデル準拠）。
+ * プレイヤーは自分の秘密鍵でchallengeに署名し、tee_auth_responseで返す。
+ * これにより各プレイヤーが自分のホールカードのみTEEから読める認証トークンが発行される。
+ */
+export interface TeeAuthChallengeMessage {
+  type: 'tee_auth_challenge';
+  challenge: string;
+  expiresIn: number; // seconds
+}
+
 /** 再接続時にゲーム状態を同期するためのメッセージ */
 export interface GameStateMessage {
   type: 'game_state';
@@ -176,7 +187,8 @@ export type ServerMessage =
   | GameCompleteMessage
   | GameStateMessage
   | ErrorMessage
-  | PongMessage;
+  | PongMessage
+  | TeeAuthChallengeMessage;
 
 // ============================================================
 // Client → Server Messages
@@ -219,12 +231,25 @@ export interface PingMessage {
   timestamp: number;
 }
 
+/**
+ * TEEチャレンジへのプレイヤー応答。
+ * プレイヤーは challenge バイト列を自分の秘密鍵で署名（ed25519 detached）し、
+ * base58エンコードされたsignatureを返す。
+ * サーバーはこれをTEE /auth/loginに転送してプレイヤー固有のTEEトークンを取得する。
+ */
+export interface TeeAuthResponseMessage {
+  type: 'tee_auth_response';
+  challenge: string;
+  signature: string; // base58エンコードのed25519署名
+}
+
 export type ClientMessage =
   | AuthenticateMessage
   | JoinQueueMessage
   | LeaveQueueMessage
   | PlayerActionMessage
-  | PingMessage;
+  | PingMessage
+  | TeeAuthResponseMessage;
 
 // ============================================================
 // Error Codes

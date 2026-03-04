@@ -40,14 +40,25 @@ export interface DecodedGameState {
 }
 
 export class GameMonitor {
-  private subscriptions = new Map<string, { l1Sub: number; erSub: number }>();
+  private subscriptions = new Map<string, {
+    l1Sub: number;
+    erSub: number;
+    teeSub?: number;
+    teeConn?: Connection;
+  }>();
 
+  /**
+   * ゲームアカウントの変更を購読する。
+   * teeConnection が指定された場合、プライベートER（TEE）からリアルタイム変更を受信する。
+   * TEE未指定時は公開ER（erConnection）を使うが、プライベートERゲームでは変更通知が届かない。
+   */
   watchGame(
     gameId: string,
     gamePda: PublicKey,
     l1Connection: Connection,
     erConnection: Connection,
     onUpdate: (gameState: DecodedGameState) => void,
+    teeConnection?: Connection,
   ): void {
     if (this.subscriptions.has(gameId)) {
       return;
@@ -67,14 +78,21 @@ export class GameMonitor {
     const l1Sub = l1Connection.onAccountChange(gamePda, handleAccountChange, 'confirmed');
     const erSub = erConnection.onAccountChange(gamePda, handleAccountChange, 'confirmed');
 
-    this.subscriptions.set(gameId, { l1Sub, erSub });
-    console.log(`[GameMonitor] Watching game ${gameId}`);
+    // プライベートER（TEE）WebSocket購読: ゲームアカウントのリアルタイム変更を受信する
+    let teeSub: number | undefined;
+    if (teeConnection) {
+      teeSub = teeConnection.onAccountChange(gamePda, handleAccountChange, 'confirmed');
+      console.log(`[GameMonitor] Watching game ${gameId} (L1 + public ER + private ER TEE)`);
+    } else {
+      console.log(`[GameMonitor] Watching game ${gameId} (L1 + public ER only, no TEE)`);
+    }
+
+    this.subscriptions.set(gameId, { l1Sub, erSub, teeSub, teeConn: teeConnection });
 
     // onAccountChange はアカウントの「変化」のみ通知し、初期状態は通知しない。
-    // ゲーム開始直後は Waiting のまま変化が発生しないため、クランクが起動しない。
-    // 購読直後に現在の状態を取得して onUpdate を呼ぶことで初回クランクを確実に起動する。
-    // ER へのデリゲーション直後は伝播に時間がかかる場合があるため最大3回リトライする。
-    void this.fetchInitialState(gameId, gamePda, erConnection, l1Connection, handleAccountChange);
+    // プライベートERではTEE接続から初期取得する。公開ERにはアカウントが存在しない。
+    const primaryConn = teeConnection ?? erConnection;
+    void this.fetchInitialState(gameId, gamePda, primaryConn, l1Connection, handleAccountChange);
   }
 
   unwatchGame(gameId: string, l1Connection: Connection, erConnection: Connection): void {
@@ -83,6 +101,9 @@ export class GameMonitor {
 
     l1Connection.removeAccountChangeListener(subs.l1Sub);
     erConnection.removeAccountChangeListener(subs.erSub);
+    if (subs.teeSub !== undefined && subs.teeConn) {
+      subs.teeConn.removeAccountChangeListener(subs.teeSub);
+    }
     this.subscriptions.delete(gameId);
     console.log(`[GameMonitor] Unwatched game ${gameId}`);
   }

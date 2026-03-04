@@ -20,6 +20,7 @@
 9. [インストール・セットアップ手順](#9-インストールセットアップ手順)
 10. [テスト戦略](#10-テスト戦略)
 11. [セキュリティ考慮事項](#11-セキュリティ考慮事項)
+12. [TEE認証フロー（Private Ephemeral Rollup）](#49-tee認証メッセージ)
 
 ---
 
@@ -439,6 +440,7 @@ metadata:
 | `leave_queue` | マッチングキューからの離脱 | [4.4](#44-マッチングメッセージ) |
 | `player_action` | ポーカーアクションの送信 | [4.5](#45-ゲームプレイメッセージ) |
 | `ping` | ハートビート | [4.7](#47-接続管理メッセージ) |
+| `tee_auth_response` | TEEチャレンジへの署名応答（ホールカード復号化に必須） | [4.9](#49-tee認証メッセージ) |
 
 #### サーバー → クライアント（サーバーがPush）
 
@@ -458,6 +460,7 @@ metadata:
 | `game_complete` | ゲーム終了 | [4.6](#46-ゲーム結果メッセージ) |
 | `error` | エラー通知 | [4.8](#48-エラーメッセージ) |
 | `pong` | ハートビート応答 | [4.7](#47-接続管理メッセージ) |
+| `tee_auth_challenge` | TEE認証チャレンジ（game_joined直後に送信） | [4.9](#49-tee認証メッセージ) |
 
 ### 4.3 認証メッセージ
 
@@ -836,6 +839,56 @@ WebSocket接続が確立された直後にサーバーが送信する。
 | `SERVER_ERROR` | サーバー内部エラー |
 | `RATE_LIMITED` | レートリミット超過 |
 | `GAME_IN_PROGRESS` | 既にゲーム中のため新たなキュー参加不可 |
+
+### 4.9 TEE認証メッセージ
+
+MagicBlock Private Ephemeral Rollup (TEE) 環境では、各プレイヤーが自分の秘密鍵でTEEチャレンジに署名することで、自分のホールカードのみをTEEから読み取れるトークンが発行される。
+
+#### tee_auth_challenge（サーバー → クライアント）
+
+`game_joined` 受信直後にサーバーが送信する。
+
+```json
+{
+  "type": "tee_auth_challenge",
+  "challenge": "<tee-issued-challenge-string>",
+  "expiresIn": 60
+}
+```
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `challenge` | `string` | TEEが発行したチャレンジ文字列 |
+| `expiresIn` | `number` | チャレンジの有効期限（秒） |
+
+#### tee_auth_response（クライアント → サーバー）
+
+```json
+{
+  "type": "tee_auth_response",
+  "challenge": "<same-challenge-from-tee_auth_challenge>",
+  "signature": "<base58-encoded-ed25519-signature>"
+}
+```
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `challenge` | `string` | `tee_auth_challenge` で受信したchallenge（そのまま返す） |
+| `signature` | `string` | challengeのUTF-8バイトを秘密鍵でEd25519署名したもの（Base58） |
+
+**署名方法:**
+
+```
+署名対象バイト = Buffer.from(challenge, 'utf-8')  // challengeのUTF-8バイト列
+署名アルゴリズム = Ed25519 detached signature
+鍵 = Solanaウォレットの秘密鍵 (CLAW_POKER_WALLET_PRIVATE_KEY)
+```
+
+> ⚠️ **重要**: 初期認証（`auth_challenge`）とは異なり、TEEチャレンジは**プレフィックスなし**でchallengeバイトをそのまま署名する。
+
+**TEE認証なしの動作:**
+
+TEE認証が完了しない場合、サーバーはオペレーターTEEトークンにフォールバックする（警告ログ出力）。このフォールバックは開発環境のみでの使用を想定しており、本番環境では `your_turn` の `holeCards` が正常に取得できない場合がある。
 
 ---
 

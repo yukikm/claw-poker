@@ -75,7 +75,12 @@ export class AnchorClient {
   private erProgram: Program;
   private teeRpcUrl: string | null;
   private teeWsUrl: string | null;
+  /** オペレーター用TEEトークンキャッシュ */
   private teeAuthCache: TeeAuthCache | null = null;
+  /** プレイヤー別TEE接続キャッシュ（pubkey.toString() → Connection） */
+  private playerTeeConnections = new Map<string, { token: string; expiresAt: number; connection: Connection }>();
+  /** getActiveErProgram用キャッシュ（オペレータートークンが変わったら再生成） */
+  private cachedTeeProgram: { program: Program; token: string } | null = null;
 
   constructor(rpcUrl: string, erRpcUrl: string) {
     this.l1Connection = new Connection(rpcUrl, 'confirmed');
@@ -100,8 +105,34 @@ export class AnchorClient {
       }
     }
 
-    // AnchorProviderのWalletインターフェースを実装（NodeWallet互換）
-    const makeWallet = (kp: Keypair): Wallet => ({
+    const l1Provider = new AnchorProvider(this.l1Connection, this.makeWallet(this.operatorKeypair), {
+      commitment: 'confirmed',
+    });
+    // erProvider は公開ER用（skipPreflight: true でシミュレーション回避）
+    const erProvider = new AnchorProvider(this.erConnection, this.makeWallet(this.operatorKeypair), {
+      commitment: 'confirmed',
+      skipPreflight: true,
+    });
+
+    this.l1Program = new Program(IDL, l1Provider);
+    this.erProgram = new Program(IDL, erProvider);
+
+    // TEE RPC URL（Private Ephemeral Rollup用。未設定時はホールカード読み取りがERフォールバック）
+    this.teeRpcUrl = process.env.MAGICBLOCK_TEE_RPC_URL ?? null;
+    this.teeWsUrl = process.env.MAGICBLOCK_TEE_WS_URL ?? null;
+    if (this.teeRpcUrl) {
+      console.log('[AnchorClient] TEE RPC configured for private PlayerState access');
+    } else {
+      console.warn(
+        '[AnchorClient] MAGICBLOCK_TEE_RPC_URL not set. ' +
+        'Hole card reads will use ER connection (privacy not enforced).',
+      );
+    }
+  }
+
+  /** AnchorProvider用Walletを生成する（クラスメソッド化でTEEプログラム生成にも再利用） */
+  private makeWallet(kp: Keypair): Wallet {
+    return {
       payer: kp,
       publicKey: kp.publicKey,
       signTransaction: async <T extends Transaction | VersionedTransaction>(tx: T): Promise<T> => {
@@ -122,29 +153,7 @@ export class AnchorClient {
         });
         return txs;
       },
-    });
-
-    const l1Provider = new AnchorProvider(this.l1Connection, makeWallet(this.operatorKeypair), {
-      commitment: 'confirmed',
-    });
-    const erProvider = new AnchorProvider(this.erConnection, makeWallet(this.operatorKeypair), {
-      commitment: 'confirmed',
-    });
-
-    this.l1Program = new Program(IDL, l1Provider);
-    this.erProgram = new Program(IDL, erProvider);
-
-    // TEE RPC URL（Private Ephemeral Rollup用。未設定時はホールカード読み取りがERフォールバック）
-    this.teeRpcUrl = process.env.MAGICBLOCK_TEE_RPC_URL ?? null;
-    this.teeWsUrl = process.env.MAGICBLOCK_TEE_WS_URL ?? null;
-    if (this.teeRpcUrl) {
-      console.log('[AnchorClient] TEE RPC configured for private PlayerState access');
-    } else {
-      console.warn(
-        '[AnchorClient] MAGICBLOCK_TEE_RPC_URL not set. ' +
-        'Hole card reads will use ER connection (privacy not enforced).',
-      );
-    }
+    };
   }
 
   getL1Connection(): Connection {
@@ -585,8 +594,9 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
 
     const anchorAmount = amount !== undefined ? new BN(amount) : null;
+    const activeProgram = await this.getActiveErProgram();
 
-    const txSig = await (this.erProgram.methods as unknown as {
+    const txSig = await (activeProgram.methods as unknown as {
       playerAction: (
         gameId: BN,
         action: Record<string, Record<string, never>>,
@@ -614,8 +624,9 @@ export class AnchorClient {
   async startNewHand(gameId: bigint): Promise<string> {
     const [gamePda] = this.deriveGamePda(gameId);
     const operatorPubkey = this.operatorKeypair.publicKey;
+    const activeProgram = await this.getActiveErProgram();
 
-    const txSig = await (this.erProgram.methods as unknown as {
+    const txSig = await (activeProgram.methods as unknown as {
       startNewHand: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
       };
@@ -644,8 +655,9 @@ export class AnchorClient {
     const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
     const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
     const operatorPubkey = this.operatorKeypair.publicKey;
+    const activeProgram = await this.getActiveErProgram();
 
-    const txSig = await (this.erProgram.methods as unknown as {
+    const txSig = await (activeProgram.methods as unknown as {
       requestShuffle: (gameId: BN, clientSeed: number) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
       };
@@ -726,7 +738,8 @@ export class AnchorClient {
     const [playerStatePda] = this.derivePlayerStatePda(gameId, timedOutPlayerWallet);
     const operatorPubkey = this.operatorKeypair.publicKey;
 
-    const txSig = await (this.erProgram.methods as unknown as {
+    const activeProgram = await this.getActiveErProgram();
+    const txSig = await (activeProgram.methods as unknown as {
       handleTimeout: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
       };
@@ -777,8 +790,10 @@ export class AnchorClient {
     const [gamePda] = this.deriveGamePda(gameId);
     const operatorPubkey = this.operatorKeypair.publicKey;
 
-    // ER上のGameアカウントからplayer1/player2を読み取る
-    const gameAccount = await this.erConnection.getAccountInfo(gamePda, 'confirmed');
+    // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
+    const teeConnForRead = await this.getTeeConnection().catch(() => null);
+    const readConn = teeConnForRead ?? this.erConnection;
+    const gameAccount = await readConn.getAccountInfo(gamePda, 'confirmed');
     if (!gameAccount) {
       throw new Error(`Game account not found for gameId ${gameId}`);
     }
@@ -799,7 +814,8 @@ export class AnchorClient {
     const permissionP2   = this.derivePermissionPda(player2StatePda);
     const permissionGame = this.derivePermissionPda(gamePda);
 
-    const txSig = await (this.erProgram.methods as unknown as {
+    const activeProgram = await this.getActiveErProgram();
+    const txSig = await (activeProgram.methods as unknown as {
       commitGame: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
       };
@@ -829,7 +845,10 @@ export class AnchorClient {
   async fetchGamePotAndStacks(gameId: bigint): Promise<{ pot: number; player1ChipStack: number; player2ChipStack: number } | null> {
     try {
       const [gamePda] = this.deriveGamePda(gameId);
-      const accountInfo = await this.erConnection.getAccountInfo(gamePda, 'confirmed');
+      // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
+      const teeConnForRead = await this.getTeeConnection().catch(() => null);
+      const readConn = teeConnForRead ?? this.erConnection;
+      const accountInfo = await readConn.getAccountInfo(gamePda, 'confirmed');
       if (!accountInfo) return null;
 
       const decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as {
@@ -873,9 +892,13 @@ export class AnchorClient {
       return this.teeAuthCache.connection;
     }
 
+    // 末尾スラッシュを除去してパス結合の二重スラッシュを防ぐ
+    // MAGICBLOCK_TEE_RPC_URL="https://tee.magicblock.app/" のような設定に対応
+    const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
+
     // TEE RPCにチャレンジを要求
     const challengeRes = await fetch(
-      `${this.teeRpcUrl}/auth/challenge?pubkey=${this.operatorKeypair.publicKey.toString()}`,
+      `${baseUrl}/auth/challenge?pubkey=${this.operatorKeypair.publicKey.toString()}`,
     );
     const challengeJson = await challengeRes.json() as { challenge?: string; error?: string };
     if (challengeJson.error) {
@@ -891,7 +914,7 @@ export class AnchorClient {
     const signatureBase58 = encodeBase58(signature);
 
     // 認証トークンを取得
-    const authRes = await fetch(`${this.teeRpcUrl}/auth/login`, {
+    const authRes = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -908,11 +931,11 @@ export class AnchorClient {
     // 30日デフォルト有効期限（MagicBlock SDK SESSION_DURATION準拠）
     const expiresAt = authJson.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
 
+    // commitment は公式サンプル準拠で指定しない（providerレベルで制御）
     const teeConnection = new Connection(
-      `${this.teeRpcUrl}?token=${authJson.token}`,
+      `${baseUrl}?token=${authJson.token}`,
       {
-        commitment: 'processed',
-        wsEndpoint: this.teeWsUrl ? `${this.teeWsUrl}?token=${authJson.token}` : undefined,
+        wsEndpoint: this.teeWsUrl ? `${this.teeWsUrl.replace(/\/+$/, '')}?token=${authJson.token}` : undefined,
       },
     );
 
@@ -921,17 +944,124 @@ export class AnchorClient {
     return teeConnection;
   }
 
+  /**
+   * プライベートER（TEE）用のAnchorProgramを取得する。
+   * オペレータートークンが変わるまでProgramをキャッシュして再生成コストを削減する。
+   * ER上への書き込みトランザクション（playerAction, requestShuffle等）はすべてこれを使う。
+   */
+  private async getActiveErProgram(): Promise<Program> {
+    if (!this.teeRpcUrl) return this.erProgram;
+    try {
+      const teeConn = await this.getTeeConnection();
+      if (!teeConn) return this.erProgram;
+      // オペレータートークンが変わった場合のみProgramを再生成
+      const currentToken = this.teeAuthCache?.token ?? '';
+      if (this.cachedTeeProgram && this.cachedTeeProgram.token === currentToken) {
+        return this.cachedTeeProgram.program;
+      }
+      // TEE接続はskipPreflight: trueが必須（ERはシミュレーション対象外）
+      const teeProvider = new AnchorProvider(teeConn, this.makeWallet(this.operatorKeypair), {
+        commitment: 'confirmed',
+        skipPreflight: true,
+      });
+      const program = new Program(IDL, teeProvider);
+      this.cachedTeeProgram = { program, token: currentToken };
+      return program;
+    } catch (err) {
+      console.warn('[AnchorClient] TEE program creation failed, falling back to erProgram:', err);
+      return this.erProgram;
+    }
+  }
+
+  // ─── プレイヤー別TEE認証（Private ER プライバシーモデル準拠） ─────────────────
+
+  /** TEEが設定されているか確認（index.ts から条件分岐に使用） */
+  isTeeConfigured(): boolean {
+    return this.teeRpcUrl !== null;
+  }
+
+  /**
+   * GameMonitor用にオペレーターTEE接続を公開する。
+   * プライベートERのWebSocketでゲームアカウントの変更を購読するために使用。
+   */
+  async createTeeConnectionForMonitor(): Promise<Connection | null> {
+    try {
+      return await this.getTeeConnection();
+    } catch (err) {
+      console.warn('[AnchorClient] TEE connection for monitor failed:', err);
+      return null;
+    }
+  }
+
+  /**
+   * プレイヤー用TEEチャレンジを取得する。
+   * TEE /auth/challenge?pubkey=<playerPubkey> を呼び出し、チャレンジ文字列を返す。
+   * 返却値をプレイヤーに送り、プレイヤーが自分の秘密鍵で署名して返す（tee_auth_response）。
+   */
+  async createTeeChallenge(playerPubkey: PublicKey): Promise<string | null> {
+    if (!this.teeRpcUrl) return null;
+    const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
+    const res = await fetch(`${baseUrl}/auth/challenge?pubkey=${playerPubkey.toString()}`);
+    const json = await res.json() as { challenge?: string; error?: string };
+    if (!json.challenge) {
+      throw new Error(`TEE challenge for player failed: ${json.error ?? 'no challenge'}`);
+    }
+    return json.challenge;
+  }
+
+  /**
+   * プレイヤーが署名したTEEチャレンジを交換してプレイヤー専用トークンをキャッシュする。
+   * 公式PERモデル準拠: 各プレイヤーが自分の鍵で認証 → 自分のPlayerStateのみTEE読み取り可能。
+   * オペレーターはこのトークンを使ってそのプレイヤーのホールカードのみ読み取る。
+   */
+  async setPlayerTeeToken(
+    playerPubkey: PublicKey,
+    challenge: string,
+    signatureBase58: string,
+  ): Promise<void> {
+    if (!this.teeRpcUrl) return;
+    const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
+    const authRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pubkey: playerPubkey.toString(),
+        challenge,
+        signature: signatureBase58,
+      }),
+    });
+    const authJson = await authRes.json() as { token?: string; expiresAt?: number; error?: string };
+    if (authRes.status !== 200 || !authJson.token) {
+      throw new Error(`TEE player auth failed: ${authJson.error ?? 'no token'}`);
+    }
+    const expiresAt = authJson.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
+    const conn = new Connection(
+      `${baseUrl}?token=${authJson.token}`,
+      {
+        wsEndpoint: this.teeWsUrl
+          ? `${this.teeWsUrl.replace(/\/+$/, '')}?token=${authJson.token}`
+          : undefined,
+      },
+    );
+    this.playerTeeConnections.set(playerPubkey.toString(), {
+      token: authJson.token,
+      expiresAt,
+      connection: conn,
+    });
+    console.log(`[AnchorClient] Player TEE token set for ${playerPubkey.toBase58()}, expires: ${new Date(expiresAt).toISOString()}`);
+  }
+
   // ─── PlayerState読み取り ───────────────────────────────────────────────────
 
   /**
    * PlayerStateアカウントからホールカードを読み取る。
    *
-   * MagicBlock Private Ephemeral Rollupでは、PlayerStateがPERにデリゲートされると
-   * ホールカードデータはTEE内で暗号化され、通常のER RPCでは読み取れない。
-   * TEE認証済みコネクション（operatorKeypairで認証）経由でのみアクセス可能。
-   *
-   * MAGICBLOCK_TEE_RPC_URL が設定されている場合はTEEコネクションを使用し、
-   * 未設定の場合はERコネクションにフォールバックする（開発環境向け）。
+   * 接続優先順位（公式PER仕様準拠）:
+   * 1. プレイヤー固有TEE接続（setPlayerTeeTokenでキャッシュ済み）← 最優先
+   *    プレイヤーが自分の鍵で認証 → 自分のPlayerStateのみ読める。本来のPRIVACYモデル。
+   * 2. オペレーターTEE接続（フォールバック、プレイヤートークン未取得時）
+   *    警告ログを出力。オペレーターがACLに含まれている場合のみ動作。
+   * 3. 公開ER接続（TEE未設定の開発環境のみ）
    */
   async getPlayerHoleCards(
     gameId: bigint,
@@ -940,14 +1070,31 @@ export class AnchorClient {
     try {
       const [playerStatePda] = this.derivePlayerStatePda(gameId, playerWallet);
 
-      // TEE認証済みコネクションを優先使用。未設定時はERフォールバック。
       let connection: Connection;
-      try {
-        const teeConn = await this.getTeeConnection();
-        connection = teeConn ?? this.erConnection;
-      } catch (teeErr) {
-        console.warn('[AnchorClient] TEE auth failed, falling back to ER connection:', teeErr);
-        connection = this.erConnection;
+      const playerKey = playerWallet.toString();
+      const playerCached = this.playerTeeConnections.get(playerKey);
+
+      if (
+        playerCached &&
+        playerCached.expiresAt > Date.now() + AnchorClient.TEE_TOKEN_REFRESH_BUFFER_MS
+      ) {
+        // 優先: プレイヤー自身のTEEトークン（公式PERモデル準拠）
+        connection = playerCached.connection;
+      } else {
+        // フォールバック: オペレーターTEE接続
+        try {
+          const teeConn = await this.getTeeConnection();
+          if (teeConn) {
+            console.warn(
+              `[AnchorClient] Player TEE token not set for ${playerWallet.toBase58()}, ` +
+              'using operator TEE (privacy degraded - player should respond to tee_auth_challenge)',
+            );
+          }
+          connection = teeConn ?? this.erConnection;
+        } catch (teeErr) {
+          console.warn('[AnchorClient] TEE auth failed, falling back to ER connection:', teeErr);
+          connection = this.erConnection;
+        }
       }
 
       const accountInfo = await connection.getAccountInfo(playerStatePda, 'confirmed');

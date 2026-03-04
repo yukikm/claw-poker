@@ -96,6 +96,20 @@ const agentHandler = new AgentHandler();
 const gameMonitor = new GameMonitor();
 const anchorClient = new AnchorClient(SOLANA_RPC_URL, MAGICBLOCK_ER_URL);
 
+// ─── TEE認証レスポンスハンドラ ────────────────────────────────────────────────
+// プレイヤーが tee_auth_challenge に署名して返答したとき、プレイヤー専用TEEトークンを発行する。
+// 以降の getPlayerHoleCards はこのプレイヤー固有トークンを使用し、
+// オペレーターではなくプレイヤー自身の鍵で認証したTEEアクセスとなる（公式PERプライバシーモデル準拠）。
+agentHandler.setOnTeeAuthResponse(async (walletAddress, challenge, signature) => {
+  try {
+    const pubkey = new PublicKey(walletAddress);
+    await anchorClient.setPlayerTeeToken(pubkey, challenge, signature);
+    console.log(`[TEE] Player ${walletAddress} TEE token set successfully`);
+  } catch (err) {
+    console.error(`[TEE] Failed to set player TEE token for ${walletAddress}:`, err);
+  }
+});
+
 // ─── WSキュー参加ハンドラ（レガシーフロー）────────────────────────────────────
 // x402 HTTPフロー（POST /api/v1/queue/join）がメインのキュー参加フロー。
 // このWSハンドラは、x402-fetchを使わない直接SOL送金パターンのフォールバックとして維持。
@@ -385,11 +399,38 @@ async function tryMatchPlayers(): Promise<void> {
 
     console.log(`[Match] Game ${gameIdStr}: ${player1Entry.walletAddress} vs ${player2Entry.walletAddress}`);
 
+    // TEEが設定されている場合、各プレイヤーにTEEチャレンジを送信する。
+    // プレイヤーが自分の秘密鍵で署名して返答すると、プレイヤー専用TEEトークンが発行され、
+    // 以降のホールカード読み取りが公式PERプライバシーモデル（プレイヤー自身の鍵で認証）に準拠する。
+    if (anchorClient.isTeeConfigured()) {
+      void sendTeeAuthChallenges(player1Entry.walletAddress, player2Entry.walletAddress);
+    }
+
     // オンチェーンでゲームを初期化（非同期・エラーはログのみ）
     const player1Pubkey = new PublicKey(player1Entry.walletAddress);
     const player2Pubkey = new PublicKey(player2Entry.walletAddress);
 
     initializeOnChainGame(gameId, player1Pubkey, player2Pubkey, buyIn, player1Entry, player2Entry);
+  }
+}
+
+/**
+ * 両プレイヤーにTEEチャレンジを送信する。
+ * 各プレイヤーが自分の秘密鍵で署名して tee_auth_response を返すと、
+ * setOnTeeAuthResponse ハンドラがプレイヤー専用TEEトークンをキャッシュする。
+ */
+async function sendTeeAuthChallenges(wallet1: string, wallet2: string): Promise<void> {
+  for (const wallet of [wallet1, wallet2]) {
+    try {
+      const pubkey = new PublicKey(wallet);
+      const challenge = await anchorClient.createTeeChallenge(pubkey);
+      if (challenge) {
+        agentHandler.sendTeeAuthChallenge(wallet, challenge);
+        console.log(`[TEE] Sent auth challenge to ${wallet}`);
+      }
+    } catch (err) {
+      console.warn(`[TEE] Failed to create challenge for ${wallet}:`, err);
+    }
   }
 }
 
@@ -419,13 +460,18 @@ async function initializeOnChainGame(
     });
 
     // GameMonitorでゲーム状態を監視開始
+    // プライベートERのゲームアカウント変更はTEE WebSocket経由でのみ受信できる。
+    // TEE接続をGameMonitorに渡すことで、公開ER（devnet.magicblock.app）ではなく
+    // プライベートER（tee.magicblock.app）のアカウント変更を購読する。
     const [gamePda] = anchorClient.deriveGamePda(gameId);
+    const teeConnForMonitor = await anchorClient.createTeeConnectionForMonitor();
     gameMonitor.watchGame(
       gameId.toString(),
       gamePda,
       anchorClient.getL1Connection(),
       anchorClient.getERConnection(),
       (state) => onGameStateUpdate(gameId, state, player1Entry.walletAddress, player2Entry.walletAddress),
+      teeConnForMonitor ?? undefined,
     );
   } catch (err) {
     console.error(`[OnChain] Failed to initialize game ${gameId}:`, err);

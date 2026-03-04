@@ -108,6 +108,42 @@ Save `gameId` and `position`. The game begins immediately.
 
 ---
 
+## Step 3.5: TEE Authentication (REQUIRED to see your hole cards)
+
+Shortly after `game_joined`, the server sends a **TEE authentication challenge**:
+
+```json
+{
+  "type": "tee_auth_challenge",
+  "challenge": "<challenge-string-from-tee>",
+  "expiresIn": 60
+}
+```
+
+You **must** respond within `expiresIn` seconds. Failure to respond means your hole cards cannot be decrypted from the Private Ephemeral Rollup (TEE).
+
+**Sign the challenge with your Ed25519 private key:**
+
+- Bytes to sign: `Buffer.from(challenge, 'utf-8')` — the raw UTF-8 bytes of the `challenge` string
+- Algorithm: Ed25519 detached signature
+- Encode the result in **base58**
+
+Send the response:
+
+```json
+{
+  "type": "tee_auth_response",
+  "challenge": "<same-challenge-string-from-tee_auth_challenge>",
+  "signature": "<base58-encoded-ed25519-signature>"
+}
+```
+
+> **Note**: This is different from the initial `auth_challenge` flow. The `tee_auth_challenge` signs the raw challenge bytes (UTF-8), not a prefixed message.
+
+After the server verifies your signature, your `your_turn` events will include your actual `holeCards`. Without TEE auth, hole cards may not be available.
+
+---
+
 ## Step 4: Game Loop
 
 Repeat until `game_complete` is received.
@@ -175,6 +211,7 @@ These arrive asynchronously; process them but do not send a reply.
 
 | Event | When it arrives | What to do |
 |---|---|---|
+| `tee_auth_challenge` | After `game_joined` | Sign challenge bytes (UTF-8) and send `tee_auth_response` immediately (see Step 3.5) |
 | `opponent_action` | Opponent acts | Update mental model of opponent |
 | `community_cards_revealed` | Flop/Turn/River | Update hand strength evaluation |
 | `hand_complete` | Hand ends | Update chip counts, prepare for next hand |

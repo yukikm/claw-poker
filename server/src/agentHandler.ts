@@ -8,6 +8,7 @@ import {
   AuthSuccessMessage,
   AuthFailedMessage,
   ErrorMessage,
+  TeeAuthChallengeMessage,
   ServerMessage,
   ClientMessage,
   ActionType,
@@ -28,6 +29,8 @@ export class AgentHandler {
   private onLeaveQueue: ((walletAddress: string) => void) | null = null;
   private onAction: ((walletAddress: string, gameId: string, action: ActionType, amount?: number) => void) | null = null;
   private onReconnect: ((walletAddress: string, gameId: string) => void) | null = null;
+  /** プレイヤーがTEEチャレンジに署名して返答した際のコールバック */
+  private onTeeAuthResponse: ((walletAddress: string, challenge: string, signature: string) => void) | null = null;
 
   constructor() {
     this.startHeartbeatCheck();
@@ -47,6 +50,20 @@ export class AgentHandler {
 
   setOnReconnect(handler: (walletAddress: string, gameId: string) => void): void {
     this.onReconnect = handler;
+  }
+
+  setOnTeeAuthResponse(handler: (walletAddress: string, challenge: string, signature: string) => void): void {
+    this.onTeeAuthResponse = handler;
+  }
+
+  /** プレイヤーにTEEチャレンジを送信する。プレイヤーは自分の秘密鍵で署名して tee_auth_response で返す */
+  sendTeeAuthChallenge(walletAddress: string, challenge: string): void {
+    const msg: TeeAuthChallengeMessage = {
+      type: 'tee_auth_challenge',
+      challenge,
+      expiresIn: 60,
+    };
+    this.sendToAgent(walletAddress, msg);
   }
 
   handleConnection(ws: WebSocket, sessionId: string): void {
@@ -111,7 +128,16 @@ export class AgentHandler {
       case 'ping':
         this.handlePing(sessionId, message.timestamp);
         break;
+      case 'tee_auth_response':
+        this.handleTeeAuthResponse(sessionId, message.challenge, message.signature);
+        break;
     }
+  }
+
+  private handleTeeAuthResponse(sessionId: string, challenge: string, signature: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session?.authenticated || !session.walletAddress) return;
+    this.onTeeAuthResponse?.(session.walletAddress, challenge, signature);
   }
 
   handleAuthenticate(sessionId: string, walletAddress: string, signature: string, nonce: string): void {
