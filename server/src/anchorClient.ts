@@ -9,7 +9,7 @@ import {
 import { AnchorProvider, Program, BN, Idl, Wallet } from '@coral-xyz/anchor';
 import * as path from 'path';
 import nacl from 'tweetnacl';
-import { getAuthToken } from '@magicblock-labs/ephemeral-rollups-sdk';
+import bs58 from 'bs58';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const IDL = require(path.join(__dirname, '../../app/lib/claw_poker_idl.json')) as Idl;
@@ -75,6 +75,17 @@ interface TeeAuthCache {
   connection: Connection;
 }
 
+interface TeeChallengeResponse {
+  challenge?: string;
+  error?: string;
+}
+
+interface TeeLoginResponse {
+  token?: string;
+  expiresAt?: number;
+  error?: string;
+}
+
 export class AnchorClient {
   private l1Connection: Connection;
   private erConnection: Connection;
@@ -89,6 +100,9 @@ export class AnchorClient {
   private playerTeeConnections = new Map<string, { token: string; expiresAt: number; connection: Connection }>();
   /** getActiveErProgram用キャッシュ（オペレータートークンが変わったら再生成） */
   private cachedTeeProgram: { program: Program; token: string } | null = null;
+  /** TEE認証トークンの有効期限バッファ（5分前に再取得） */
+  private static readonly TEE_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+  private static readonly TEE_DEFAULT_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 
   constructor(rpcUrl: string, erRpcUrl: string) {
     this.l1Connection = new Connection(rpcUrl, 'confirmed');
@@ -126,16 +140,164 @@ export class AnchorClient {
     this.erProgram = new Program(IDL, erProvider);
 
     // TEE RPC URL（Private Ephemeral Rollup用。未設定時はホールカード読み取りがERフォールバック）
-    this.teeRpcUrl = process.env.MAGICBLOCK_TEE_RPC_URL ?? null;
-    this.teeWsUrl = process.env.MAGICBLOCK_TEE_WS_URL ?? null;
+    const rawTeeRpcUrl = process.env.MAGICBLOCK_TEE_RPC_URL;
+    const rawTeeWsUrl = process.env.MAGICBLOCK_TEE_WS_URL;
+    this.teeRpcUrl = rawTeeRpcUrl
+      ? AnchorClient.sanitizeEndpoint(rawTeeRpcUrl, 'MAGICBLOCK_TEE_RPC_URL', 'rpc')
+      : null;
+    this.teeWsUrl = rawTeeWsUrl
+      ? AnchorClient.sanitizeEndpoint(rawTeeWsUrl, 'MAGICBLOCK_TEE_WS_URL', 'ws')
+      : null;
     if (this.teeRpcUrl) {
-      console.log('[AnchorClient] TEE RPC configured for private PlayerState access');
+      console.log(`[AnchorClient] TEE RPC configured: ${this.teeRpcUrl}`);
     } else {
       console.warn(
         '[AnchorClient] MAGICBLOCK_TEE_RPC_URL not set. ' +
         'Hole card reads will use ER connection (privacy not enforced).',
       );
     }
+  }
+
+  private static sanitizeEndpoint(
+    rawUrl: string,
+    envKey: string,
+    type: 'rpc' | 'ws',
+  ): string {
+    const cleaned = rawUrl.trim().replace(/^['"]+|['"]+$/g, '');
+    if (!cleaned) {
+      throw new Error(`${envKey} is empty`);
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(cleaned);
+    } catch {
+      throw new Error(`${envKey} must be a valid URL. Received: ${rawUrl}`);
+    }
+
+    if (type === 'rpc') {
+      if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+      if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`${envKey} must use http(s) or ws(s). Received: ${rawUrl}`);
+      }
+    } else {
+      if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+      if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+      if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+        throw new Error(`${envKey} must use ws(s) or http(s). Received: ${rawUrl}`);
+      }
+    }
+
+    parsed.hash = '';
+    parsed.search = '';
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    return parsed.toString().replace(/\/$/, '');
+  }
+
+  private buildTeeRpcUrl(pathname = '', token?: string): string {
+    if (!this.teeRpcUrl) {
+      throw new Error('MAGICBLOCK_TEE_RPC_URL is not configured');
+    }
+    const url = new URL(this.teeRpcUrl);
+    if (pathname) {
+      const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+      url.pathname = `${url.pathname.replace(/\/+$/, '')}${normalizedPath}`;
+      url.search = '';
+    } else {
+      url.search = '';
+    }
+    if (token) {
+      url.searchParams.set('token', token);
+    }
+    return url.toString();
+  }
+
+  private buildTeeWsUrl(token: string): string | undefined {
+    const wsBase = this.teeWsUrl
+      ?? (this.teeRpcUrl
+        ? this.teeRpcUrl
+          .replace(/^https:/, 'wss:')
+          .replace(/^http:/, 'ws:')
+        : null);
+    if (!wsBase) return undefined;
+    const url = new URL(wsBase);
+    url.search = '';
+    url.searchParams.set('token', token);
+    return url.toString();
+  }
+
+  private async fetchTeeJson<T extends object>(
+    url: string,
+    init: RequestInit,
+    context: string,
+  ): Promise<T> {
+    const headers = new Headers(init.headers);
+    headers.set('Accept', 'application/json');
+    headers.set('solana-client', 'claw-poker-server');
+
+    const response = await fetch(url, { ...init, headers });
+    const body = await response.text();
+    const contentType = response.headers.get('content-type') ?? '';
+
+    if (!response.ok) {
+      throw new Error(`${context} HTTP ${response.status} (${url}): ${body.slice(0, 200)}`);
+    }
+    if (!contentType.includes('application/json')) {
+      throw new Error(
+        `${context} returned non-JSON (${contentType}) (${url}): ${body.slice(0, 200)}`,
+      );
+    }
+
+    try {
+      return JSON.parse(body) as T;
+    } catch {
+      throw new Error(`${context} returned invalid JSON (${url}): ${body.slice(0, 200)}`);
+    }
+  }
+
+  private async requestTeeChallenge(pubkey: PublicKey): Promise<string> {
+    const challengeUrl = new URL(this.buildTeeRpcUrl('/auth/challenge'));
+    challengeUrl.searchParams.set('pubkey', pubkey.toBase58());
+    const challengeJson = await this.fetchTeeJson<TeeChallengeResponse>(
+      challengeUrl.toString(),
+      { method: 'GET' },
+      'TEE challenge',
+    );
+    if (challengeJson.error) {
+      throw new Error(`TEE challenge failed: ${challengeJson.error}`);
+    }
+    if (!challengeJson.challenge) {
+      throw new Error('TEE challenge failed: no challenge received');
+    }
+    return challengeJson.challenge;
+  }
+
+  private async requestTeeLogin(
+    pubkey: PublicKey,
+    challenge: string,
+    signatureBase58: string,
+  ): Promise<{ token: string; expiresAt: number }> {
+    const loginJson = await this.fetchTeeJson<TeeLoginResponse>(
+      this.buildTeeRpcUrl('/auth/login'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pubkey: pubkey.toBase58(),
+          challenge,
+          signature: signatureBase58,
+        }),
+      },
+      'TEE login',
+    );
+    if (!loginJson.token) {
+      throw new Error(`TEE login failed: ${loginJson.error ?? 'no token received'}`);
+    }
+    return {
+      token: loginJson.token,
+      expiresAt: loginJson.expiresAt ?? Date.now() + AnchorClient.TEE_DEFAULT_SESSION_MS,
+    };
   }
 
   /** AnchorProvider用Walletを生成する（クラスメソッド化でTEEプログラム生成にも再利用） */
@@ -878,9 +1040,6 @@ export class AnchorClient {
 
   // ─── TEE認証 ────────────────────────────────────────────────────────────
 
-  /** TEE認証トークンの有効期限バッファ（5分前に再取得） */
-  private static readonly TEE_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
   /**
    * TEE認証済みConnectionを取得する。
    * operatorKeypairでチャレンジに署名してTEE RPCの認証トークンを取得し、
@@ -900,23 +1059,21 @@ export class AnchorClient {
       return this.teeAuthCache.connection;
     }
 
-    // 末尾スラッシュを除去してパス結合の二重スラッシュを防ぐ
-    const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
-
-    // 公式SDK getAuthToken() を使用（チャレンジ取得→署名→トークン交換を一括処理）
-    const secretKey = this.operatorKeypair.secretKey;
-    const authResult = await getAuthToken(
-      baseUrl,
+    const challenge = await this.requestTeeChallenge(this.operatorKeypair.publicKey);
+    const challengeBytes = new Uint8Array(Buffer.from(challenge, 'utf-8'));
+    const signatureBase58 = bs58.encode(
+      nacl.sign.detached(challengeBytes, this.operatorKeypair.secretKey),
+    );
+    const { token, expiresAt } = await this.requestTeeLogin(
       this.operatorKeypair.publicKey,
-      (message: Uint8Array) => Promise.resolve(nacl.sign.detached(message, secretKey)),
+      challenge,
+      signatureBase58,
     );
 
-    const { token, expiresAt } = authResult;
-
     const teeConnection = new Connection(
-      `${baseUrl}?token=${token}`,
+      this.buildTeeRpcUrl('', token),
       {
-        wsEndpoint: this.teeWsUrl ? `${this.teeWsUrl.replace(/\/+$/, '')}?token=${token}` : undefined,
+        wsEndpoint: this.buildTeeWsUrl(token),
       },
     );
 
@@ -964,6 +1121,12 @@ export class AnchorClient {
     return this.teeRpcUrl !== null;
   }
 
+  /** マッチ開始前にTEE接続が有効かを検証する（失敗時は例外）。 */
+  async ensureTeeReady(): Promise<void> {
+    if (!this.teeRpcUrl) return;
+    await this.getTeeConnection();
+  }
+
   /**
    * GameMonitor用にオペレーターTEE接続を公開する。
    * プライベートERのWebSocketでゲームアカウントの変更を購読するために使用。
@@ -984,25 +1147,7 @@ export class AnchorClient {
    */
   async createTeeChallenge(playerPubkey: PublicKey): Promise<string | null> {
     if (!this.teeRpcUrl) return null;
-    const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
-    const res = await fetch(`${baseUrl}/auth/challenge?pubkey=${playerPubkey.toString()}`);
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`TEE challenge HTTP ${res.status}: ${body.slice(0, 200)}`);
-    }
-    const contentType = res.headers.get('content-type') ?? '';
-    if (!contentType.includes('application/json')) {
-      const body = await res.text();
-      throw new Error(`TEE challenge returned non-JSON (${contentType}): ${body.slice(0, 200)}`);
-    }
-    const json = await res.json() as { challenge?: string; error?: string };
-    if (json.error) {
-      throw new Error(`TEE challenge for player failed: ${json.error}`);
-    }
-    if (!json.challenge) {
-      throw new Error('TEE challenge for player: no challenge received');
-    }
-    return json.challenge;
+    return this.requestTeeChallenge(playerPubkey);
   }
 
   /**
@@ -1016,40 +1161,19 @@ export class AnchorClient {
     signatureBase58: string,
   ): Promise<void> {
     if (!this.teeRpcUrl) return;
-    const baseUrl = this.teeRpcUrl.replace(/\/+$/, '');
-    const authRes = await fetch(`${baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pubkey: playerPubkey.toString(),
-        challenge,
-        signature: signatureBase58,
-      }),
-    });
-    if (!authRes.ok) {
-      const body = await authRes.text();
-      throw new Error(`TEE player login HTTP ${authRes.status}: ${body.slice(0, 200)}`);
-    }
-    const authContentType = authRes.headers.get('content-type') ?? '';
-    if (!authContentType.includes('application/json')) {
-      const body = await authRes.text();
-      throw new Error(`TEE player login returned non-JSON (${authContentType}): ${body.slice(0, 200)}`);
-    }
-    const authJson = await authRes.json() as { token?: string; expiresAt?: number; error?: string };
-    if (!authJson.token) {
-      throw new Error(`TEE player auth failed: ${authJson.error ?? 'no token'}`);
-    }
-    const expiresAt = authJson.expiresAt ?? Date.now() + 30 * 24 * 60 * 60 * 1000;
+    const { token, expiresAt } = await this.requestTeeLogin(
+      playerPubkey,
+      challenge,
+      signatureBase58,
+    );
     const conn = new Connection(
-      `${baseUrl}?token=${authJson.token}`,
+      this.buildTeeRpcUrl('', token),
       {
-        wsEndpoint: this.teeWsUrl
-          ? `${this.teeWsUrl.replace(/\/+$/, '')}?token=${authJson.token}`
-          : undefined,
+        wsEndpoint: this.buildTeeWsUrl(token),
       },
     );
     this.playerTeeConnections.set(playerPubkey.toString(), {
-      token: authJson.token,
+      token,
       expiresAt,
       connection: conn,
     });

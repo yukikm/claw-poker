@@ -348,6 +348,18 @@ async function tryMatchPlayers(): Promise<void> {
 
     if (!player1Entry || !player2Entry) break;
 
+    // Private ER運用時は、TEE書き込み接続を事前検証してからマッチを成立させる。
+    // 認証失敗時にゲームだけ初期化されると Waiting で停止し続けるため、キューに戻して保留する。
+    if (anchorClient.isTeeConfigured()) {
+      try {
+        await anchorClient.ensureTeeReady();
+      } catch (err) {
+        matchmakingQueue.unshift(player1Entry, player2Entry);
+        console.error('[Match] TEE is unavailable. Postponing match and keeping players in queue:', err);
+        break;
+      }
+    }
+
     // ゲームID: Unixミリ秒 * 65536 + 2バイト乱数で衝突リスクを排除（u64上限内に収まる）
     const rndSuffix = BigInt(randomBytes(2).readUInt16BE(0));
     const gameId = BigInt(Date.now()) * 65536n + rndSuffix;
