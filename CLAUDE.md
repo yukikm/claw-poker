@@ -118,4 +118,5 @@ Use these @docs references to access complete specifications:
 
 ## Memory
 
-Please record task on memory
+Please record task on memory.
+(./.claude/MEMORY.md)

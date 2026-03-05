@@ -1199,6 +1199,9 @@ export class AnchorClient {
     targetPhase: number,
     boardCards: number[],
   ): Promise<string> {
+    if (boardCards.length === 0 || boardCards.some(c => c === undefined || c === null || c < 0 || c > 51)) {
+      throw new Error(`[revealCommunityCards] Invalid boardCards for game ${gameId}: ${JSON.stringify(boardCards)}`);
+    }
     const [gamePda] = this.deriveGamePda(gameId);
     const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
     const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
@@ -1208,14 +1211,14 @@ export class AnchorClient {
     let txSig: string;
     try {
       txSig = await (activeProgram.methods as unknown as {
-        revealCommunityCards: (gameId: BN, phase: Record<string, unknown>, boardCards: number[]) => {
+        revealCommunityCards: (gameId: BN, phase: Record<string, unknown>, boardCards: Buffer) => {
           accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
         };
       })
         .revealCommunityCards(
           new BN(gameId.toString()),
           this.encodeGamePhase(targetPhase),
-          boardCards,
+          Buffer.from(boardCards),
         )
         .accounts({
           game: gamePda,
