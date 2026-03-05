@@ -243,6 +243,23 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
     return;
   }
 
+  // フェーズチェック: Waiting/Shuffling中のアクション送信を防ぐ。
+  // VRF callbackがPreFlopへ遷移するまではアクション送信不可。
+  // これがないと、initializeGame直後にcurrentTurnが設定されたエージェントが
+  // 即座にアクションを送り、ゲーム状態を破壊してVRF callbackが永久に失敗する。
+  const currentPhase = prevGameStates.get(gameIdStr);
+  if (currentPhase) {
+    const playingPhases = new Set(['PreFlop', 'Flop', 'Turn', 'River']);
+    if (!playingPhases.has(currentPhase.phase)) {
+      agentHandler.sendToAgent(walletAddress, {
+        type: 'error',
+        code: 'INVALID_ACTION',
+        message: `Cannot perform action during ${currentPhase.phase} phase. Wait for cards to be dealt.`,
+      });
+      return;
+    }
+  }
+
   try {
     // TEEオペレーターとしてプレイヤーアクションをER上で実行
     const playerPubkey = new PublicKey(walletAddress);
@@ -686,9 +703,25 @@ async function onGameStateUpdate(
     return;
   }
 
-  // ターン変更時のみyour_turnを送信（重複送信防止）
+  // ターン変更時のみyour_turnを送信（Waiting/Shuffling/Showdown/Finishedフェーズ中は送信しない）
+  // Waiting/Shufflingではカードが配られておらず、アクション送信は不正。
+  // initializeGame直後のfetchInitialStateでcurrentTurnが設定済みでも、
+  // VRF callback (callback_deal) がPreFlopへ遷移するまで待機する必要がある。
   const turnChanged = prevState?.currentTurn !== state.currentTurn;
-  if ((isPlayer1Turn || isPlayer2Turn) && turnChanged) {
+  const isPlayingPhase = state.phase === 'PreFlop' || state.phase === 'Flop'
+    || state.phase === 'Turn' || state.phase === 'River';
+  const prevWasNotPlaying = !prevState || !(
+    prevState.phase === 'PreFlop' || prevState.phase === 'Flop'
+    || prevState.phase === 'Turn' || prevState.phase === 'River'
+  );
+  // your_turnを送信する条件:
+  // 1. プレイ中フェーズ（PreFlop/Flop/Turn/River）であること
+  // 2. 以下のいずれかが成立:
+  //    a) ターンが変わった（通常のアクション後）
+  //    b) 非プレイ中フェーズからプレイ中フェーズに遷移した（VRF callback後のPreFlop開始時）
+  //       initializeGameでcurrentTurn=player1、callback_dealでもcurrentTurn=player1の場合、
+  //       turnChangedがfalseになるため、フェーズ遷移でもyour_turnを送信する必要がある
+  if ((isPlayer1Turn || isPlayer2Turn) && (turnChanged || prevWasNotPlaying) && isPlayingPhase) {
     const activeWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
     const myStack = isPlayer1Turn ? state.player1ChipStack : state.player2ChipStack;
     const opponentStack = isPlayer1Turn ? state.player2ChipStack : state.player1ChipStack;
