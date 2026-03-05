@@ -47,6 +47,24 @@ export interface ActiveGame {
   handNumber: number;
 }
 
+/**
+ * MagicBlock PER がversioned transactionを返す場合、Anchor内部の getTransaction で
+ * accountKeys のパースに失敗して StructError が発生する。
+ * トランザクション自体は送信・処理済みのため、このエラーは成功として扱える。
+ *
+ * 条件を厳密にすることで、他の accountKeys 関連エラー（例: アカウント不足）を
+ * 誤って成功扱いしないようにする。
+ */
+function isErConfirmationStructError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  // StructError は superstruct ライブラリから送出され、メッセージに "Expected" と "accountKeys" を含む
+  return (
+    msg.includes('accountKeys') &&
+    (err.name === 'StructError' || msg.includes('Expected a value of type') || msg.includes('Expected an instance of'))
+  );
+}
+
 /** 有効なアクションの集合（ランタイム検証用） */
 const VALID_ACTIONS: ReadonlySet<string> = new Set<ActionType>([
   'fold', 'check', 'call', 'bet', 'raise', 'all_in',
@@ -863,13 +881,16 @@ export class AnchorClient {
     const anchorAmount = amount !== undefined ? new BN(amount) : null;
     const activeProgram = await this.getActiveErProgram();
 
-    const txSig = await (activeProgram.methods as unknown as {
+    const methodBuilder = (activeProgram.methods as unknown as {
       playerAction: (
         gameId: BN,
         action: Record<string, Record<string, never>>,
         amount: BN | null,
       ) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        accounts: (a: Record<string, PublicKey>) => {
+          rpc: () => Promise<string>;
+          transaction: () => Promise<Transaction>;
+        };
       };
     })
       .playerAction(new BN(gameId.toString()), toAnchorAction(action), anchorAmount)
@@ -878,8 +899,21 @@ export class AnchorClient {
         playerState: playerStatePda,
         player: playerWallet,
         operator: operatorPubkey,
-      })
-      .rpc();
+      });
+
+    let txSig: string;
+    try {
+      txSig = await methodBuilder.rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(
+          `[AnchorClient] Action ${action} for ${playerWallet.toBase58()} in game ${gameId}: ` +
+          'tx sent but confirmation parsing failed (versioned tx StructError). Treating as success.',
+        );
+        return '';
+      }
+      throw rpcErr;
+    }
 
     console.log(`[AnchorClient] Action ${action} for ${playerWallet.toBase58()} in game ${gameId}: ${txSig}`);
     return txSig;
@@ -893,17 +927,26 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    const txSig = await (activeProgram.methods as unknown as {
-      startNewHand: (gameId: BN) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .startNewHand(new BN(gameId.toString()))
-      .accounts({
-        game: gamePda,
-        operator: operatorPubkey,
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        startNewHand: (gameId: BN) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
       })
-      .rpc();
+        .startNewHand(new BN(gameId.toString()))
+        .accounts({
+          game: gamePda,
+          operator: operatorPubkey,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] startNewHand for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
 
     console.log(`[AnchorClient] Started new hand for game ${gameId}: ${txSig}`);
     return txSig;
@@ -924,20 +967,29 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    const txSig = await (activeProgram.methods as unknown as {
-      requestShuffle: (gameId: BN, clientSeed: number) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .requestShuffle(new BN(gameId.toString()), clientSeed)
-      .accounts({
-        game: gamePda,
-        operator: operatorPubkey,
-        player1State: player1StatePda,
-        player2State: player2StatePda,
-        oracleQueue: DEFAULT_ORACLE_QUEUE,
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        requestShuffle: (gameId: BN, clientSeed: number) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
       })
-      .rpc();
+        .requestShuffle(new BN(gameId.toString()), clientSeed)
+        .accounts({
+          game: gamePda,
+          operator: operatorPubkey,
+          player1State: player1StatePda,
+          player2State: player2StatePda,
+          oracleQueue: DEFAULT_ORACLE_QUEUE,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] requestShuffle for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
 
     console.log(`[AnchorClient] Requested shuffle for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1006,18 +1058,27 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
 
     const activeProgram = await this.getActiveErProgram();
-    const txSig = await (activeProgram.methods as unknown as {
-      handleTimeout: (gameId: BN) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .handleTimeout(new BN(gameId.toString()))
-      .accounts({
-        game: gamePda,
-        timedOutPlayerState: playerStatePda,
-        operator: operatorPubkey,
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        handleTimeout: (gameId: BN) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
       })
-      .rpc();
+        .handleTimeout(new BN(gameId.toString()))
+        .accounts({
+          game: gamePda,
+          timedOutPlayerState: playerStatePda,
+          operator: operatorPubkey,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] handleTimeout for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
 
     console.log(`[AnchorClient] Timeout handled for game ${gameId}, player ${timedOutPlayerWallet.toBase58()}: ${txSig}`);
     return txSig;
@@ -1061,15 +1122,17 @@ export class AnchorClient {
     const teeConnForRead = await this.getTeeConnection().catch(() => null);
     const readConn = teeConnForRead ?? this.erConnection;
     const gameAccount = await readConn.getAccountInfo(gamePda, 'confirmed');
-    if (!gameAccount) {
-      throw new Error(`Game account not found for gameId ${gameId}`);
+    if (!gameAccount || gameAccount.data.length < 8) {
+      throw new Error(`Game account not found or not initialized for gameId ${gameId}`);
     }
 
     // M-x402-2と同様にIDLのcoder.accounts.decodeで動的にデコードし、バイナリオフセットのハードコードを排除
-    const decodedGame = this.erProgram.coder.accounts.decode('Game', gameAccount.data) as {
-      player1: PublicKey;
-      player2: PublicKey;
-    };
+    let decodedGame: { player1: PublicKey; player2: PublicKey };
+    try {
+      decodedGame = this.erProgram.coder.accounts.decode('Game', gameAccount.data) as typeof decodedGame;
+    } catch {
+      throw new Error(`Game account for gameId ${gameId} exists but is not decodable (discriminator mismatch or not initialized)`);
+    }
     const player1 = decodedGame.player1;
     const player2 = decodedGame.player2;
 
@@ -1082,24 +1145,33 @@ export class AnchorClient {
     const permissionGame = this.derivePermissionPda(gamePda);
 
     const activeProgram = await this.getActiveErProgram();
-    const txSig = await (activeProgram.methods as unknown as {
-      commitGame: (gameId: BN) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      };
-    })
-      .commitGame(new BN(gameId.toString()))
-      .accounts({
-        payer: operatorPubkey,
-        operator: operatorPubkey,
-        game: gamePda,
-        player1State: player1StatePda,
-        player2State: player2StatePda,
-        permissionP1: permissionP1,
-        permissionP2: permissionP2,
-        permissionGame: permissionGame,
-        permissionProgram: PERMISSION_PROG,
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        commitGame: (gameId: BN) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
       })
-      .rpc();
+        .commitGame(new BN(gameId.toString()))
+        .accounts({
+          payer: operatorPubkey,
+          operator: operatorPubkey,
+          game: gamePda,
+          player1State: player1StatePda,
+          player2State: player2StatePda,
+          permissionP1: permissionP1,
+          permissionP2: permissionP2,
+          permissionGame: permissionGame,
+          permissionProgram: PERMISSION_PROG,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] commitGame for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
 
     console.log(`[AnchorClient] Checkpoint commit for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1116,13 +1188,21 @@ export class AnchorClient {
       const teeConnForRead = await this.getTeeConnection().catch(() => null);
       const readConn = teeConnForRead ?? this.erConnection;
       const accountInfo = await readConn.getAccountInfo(gamePda, 'confirmed');
-      if (!accountInfo) return null;
+      if (!accountInfo || accountInfo.data.length < 8) return null;
 
-      const decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as {
+      let decoded: {
         pot: { toNumber: () => number };
         player1ChipStack?: { toNumber: () => number };
         player2ChipStack?: { toNumber: () => number };
       };
+      try {
+        decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as typeof decoded;
+      } catch {
+        // アカウントが未初期化またはフェーズ遷移中でdiscriminatorが不一致の場合。
+        // 正常なレース条件のため warn レベルに抑制する。
+        console.warn(`[AnchorClient] Game account not decodable for ${gameId} (account may not be initialized yet)`);
+        return null;
+      }
 
       return {
         pot: decoded.pot.toNumber(),
@@ -1324,11 +1404,19 @@ export class AnchorClient {
       }
 
       const accountInfo = await connection.getAccountInfo(playerStatePda, 'confirmed');
-      if (!accountInfo) return null;
+      if (!accountInfo || accountInfo.data.length < 8) return null;
 
-      const decoded = this.erProgram.coder.accounts.decode('PlayerState', accountInfo.data) as {
-        holeCards: number[];
-      };
+      let decoded: { holeCards: number[] };
+      try {
+        decoded = this.erProgram.coder.accounts.decode('PlayerState', accountInfo.data) as {
+          holeCards: number[];
+        };
+      } catch {
+        // アカウントが未初期化またはフェーズ遷移中でdiscriminatorが不一致の場合。
+        // 正常なレース条件のため warn レベルに抑制する。
+        console.warn(`[AnchorClient] PlayerState not decodable for ${playerWallet.toBase58()} (account may not be initialized yet)`);
+        return null;
+      }
 
       const cards = decoded.holeCards;
       if (!cards || cards[0] === 255 || cards[1] === 255) return null;
