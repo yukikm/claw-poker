@@ -33,6 +33,9 @@ pub fn handler(ctx: Context<TestShuffleAndDeal>, _game_id: u64, random_seed: [u8
     ctx.accounts.player1_state.hole_cards = [deck[0], deck[1]];
     ctx.accounts.player2_state.hole_cards = [deck[2], deck[3]];
 
+    // コミュニティカード候補をGameに保存
+    game.deal_cards = [deck[4], deck[5], deck[6], deck[7], deck[8], deck[9], deck[10], deck[11]];
+
     // ブラインドレベルの更新
     let (sb, bb) = calculate_blinds(next_hand);
     game.current_small_blind = sb;

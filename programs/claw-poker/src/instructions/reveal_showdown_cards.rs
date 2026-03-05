@@ -28,7 +28,7 @@ pub struct RevealShowdownCards<'info> {
         seeds = [b"game", game_id.to_le_bytes().as_ref()],
         bump = game.bump,
         constraint = operator.key() == game.operator @ PokerError::PermissionDenied,
-        constraint = game.betting_closed @ PokerError::InvalidAction,
+        constraint = (game.phase == GamePhase::Showdown || game.betting_closed) @ PokerError::InvalidAction,
         constraint = game.phase != GamePhase::Finished @ PokerError::GameAlreadyCompleted,
         constraint = game.phase != GamePhase::Waiting @ PokerError::InvalidAction,
     )]

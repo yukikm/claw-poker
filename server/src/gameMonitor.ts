@@ -37,6 +37,8 @@ export interface DecodedGameState {
   player2HasFolded: boolean;
   player1IsAllIn: boolean;
   player2IsAllIn: boolean;
+  /** callback_dealで設定されたコミュニティカード候補 (burn1, flop*3, burn2, turn, burn3, river) */
+  dealCards: number[];
 }
 
 /**
@@ -296,6 +298,14 @@ export class GameMonitor {
       offset += 1;
 
       const player2IsAllIn = data.readUInt8(offset) === 1;
+      offset += 1;
+
+      // deal_cards (8 bytes)
+      const dealCards: number[] = [];
+      for (let i = 0; i < 8; i++) {
+        dealCards.push(data.readUInt8(offset + i));
+      }
+      offset += 8;
 
       return {
         gameId,
@@ -328,6 +338,7 @@ export class GameMonitor {
         player2HasFolded,
         player1IsAllIn,
         player2IsAllIn,
+        dealCards,
       };
     } catch (err) {
       console.error('[GameMonitor] Decode error:', err);

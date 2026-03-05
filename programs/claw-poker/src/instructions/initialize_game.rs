@@ -42,6 +42,7 @@ pub fn handler(
     game.street_action_taken = false;
     game.last_action_at = clock.unix_timestamp;
     game.created_at = clock.unix_timestamp;
+    game.deal_cards = [255u8; 8];
     game.bump = ctx.bumps.game;
 
     // Player1 State PDAを初期化

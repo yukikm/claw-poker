@@ -146,6 +146,7 @@ pub fn handler(ctx: Context<SettleHand>, _game_id: u64) -> Result<()> {
     game.player2_is_all_in = false;
     game.showdown_cards_p1 = [255u8; 2];
     game.showdown_cards_p2 = [255u8; 2];
+    game.deal_cards = [255u8; 8];
     game.betting_closed = false;
     game.current_turn = Pubkey::default();
     game.phase = GamePhase::Waiting;

@@ -82,6 +82,10 @@ const capturedShowdownCards = new Map<
 const waitingCrankExecutedAtHand = new Map<string, number>();
 /** 進行中クランク（gameId） */
 const waitingCrankInFlight = new Set<string>();
+/** ベッティングラウンド終了クランク進行中フラグ（gameId） */
+const bettingEndCrankInFlight = new Set<string>();
+/** ベッティングラウンド終了クランク実行済みフラグ（gameId → "phase:handNumber"） */
+const bettingEndCrankExecuted = new Map<string, string>();
 
 const matchmakingQueue: QueueEntry[] = [];
 
@@ -588,6 +592,74 @@ async function onGameStateUpdate(
     }
   }
 
+  // ─── ベッティングラウンド終了クランク ──────────────────────────────────────
+  // current_turn === DEFAULT_PUBKEY はベッティングラウンド終了シグナル。
+  // player_action が current_turn をゼロアドレスに設定した後、サーバーがクランクとして
+  // 次のステップ（settle_hand / reveal_community_cards / reveal_showdown_cards）を実行する。
+  const isDefaultTurn = state.currentTurn === DEFAULT_PUBKEY;
+  const isPlayPhase = state.phase === 'PreFlop' || state.phase === 'Flop'
+    || state.phase === 'Turn' || state.phase === 'River';
+  const isShowdown = state.phase === 'Showdown';
+  const hasFold = state.player1HasFolded || state.player2HasFolded;
+  const crankKey = `${state.phase}:${state.handNumber}`;
+
+  if (isDefaultTurn && (isPlayPhase || isShowdown) && !bettingEndCrankInFlight.has(gameIdStr) && bettingEndCrankExecuted.get(gameIdStr) !== crankKey) {
+    bettingEndCrankInFlight.add(gameIdStr);
+    try {
+      const p1 = new PublicKey(player1Wallet);
+      const p2 = new PublicKey(player2Wallet);
+
+      if (hasFold) {
+        // Fold → settle_hand でハンド決着
+        console.log(`[Crank] Game ${gameIdStr}: fold detected, settling hand`);
+        await anchorClient.settleHand(gameId, p1, p2);
+      } else if (isShowdown) {
+        // Showdown → reveal_showdown_cards → settle_hand
+        console.log(`[Crank] Game ${gameIdStr}: showdown, revealing cards and settling`);
+        await anchorClient.revealShowdownCards(gameId, p1, p2);
+        await anchorClient.settleHand(gameId, p1, p2);
+      } else if (state.bettingClosed) {
+        // AllInランアウト: 残りのコミュニティカードを全公開 → settle_hand
+        console.log(`[Crank] Game ${gameIdStr}: all-in runout in ${state.phase}`);
+        const dc = state.dealCards; // [burn1, flop0, flop1, flop2, burn2, turn, burn3, river]
+        // 現在のフェーズに応じて残りのカードを段階的に公開
+        if (state.phase === 'PreFlop') {
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 3, [dc[1], dc[2], dc[3]]); // Flop=3
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 4, [dc[5]]); // Turn=4
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 5, [dc[7]]); // River=5
+        } else if (state.phase === 'Flop') {
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 4, [dc[5]]); // Turn=4
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 5, [dc[7]]); // River=5
+        } else if (state.phase === 'Turn') {
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 5, [dc[7]]); // River=5
+        }
+        // River + betting_closed → ショーダウンへ
+        await anchorClient.revealShowdownCards(gameId, p1, p2);
+        await anchorClient.settleHand(gameId, p1, p2);
+      } else {
+        // 通常のベッティングラウンド終了 → 次のコミュニティカードを公開
+        const dc = state.dealCards;
+        if (state.phase === 'PreFlop') {
+          console.log(`[Crank] Game ${gameIdStr}: PreFlop ended, revealing flop`);
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 3, [dc[1], dc[2], dc[3]]); // Flop=3
+        } else if (state.phase === 'Flop') {
+          console.log(`[Crank] Game ${gameIdStr}: Flop ended, revealing turn`);
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 4, [dc[5]]); // Turn=4
+        } else if (state.phase === 'Turn') {
+          console.log(`[Crank] Game ${gameIdStr}: Turn ended, revealing river`);
+          await anchorClient.revealCommunityCards(gameId, p1, p2, 5, [dc[7]]); // River=5
+        }
+        // River終了は player_action.rs で phase=Showdown に設定されるため、
+        // ここではなく isShowdown ブランチで処理される
+      }
+      bettingEndCrankExecuted.set(gameIdStr, crankKey);
+    } catch (err) {
+      console.error(`[Crank] Failed betting-end crank for game ${gameIdStr} (phase=${state.phase}):`, err);
+    } finally {
+      bettingEndCrankInFlight.delete(gameIdStr);
+    }
+  }
+
   // コミュニティカード公開通知（フェーズ変化時）
   if (prevState && prevState.phase !== state.phase) {
     const phaseRevealMap: Record<string, 'flop' | 'turn' | 'river'> = {
@@ -931,6 +1003,8 @@ async function handleGameComplete(
   );
   waitingCrankExecutedAtHand.delete(gameIdStr);
   waitingCrankInFlight.delete(gameIdStr);
+  bettingEndCrankInFlight.delete(gameIdStr);
+  bettingEndCrankExecuted.delete(gameIdStr);
   prevGameStates.delete(gameIdStr);
   currentHandActions.delete(gameIdStr);
   handStartChips.delete(gameIdStr);
@@ -1004,6 +1078,30 @@ const { router: x402Router, isPaymentEnabled } = createX402Router(
   },
 );
 app.use(x402Router);
+
+// ─── GET /api/v1/games ──────────────────────────────────────────────────────
+// フロントエンドがプライベートER上の進行中ゲームを取得するためのAPI。
+// プライベートER（TEE）のゲームアカウントは公開ERに存在しないため、
+// フロントエンドが直接取得できない。サーバーのactiveGames + prevGameStatesから返す。
+app.get('/api/v1/games', (_req: express.Request, res: express.Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const games = Array.from(activeGames.values()).map((game) => {
+    const gameIdStr = game.gameId.toString();
+    const state = prevGameStates.get(gameIdStr);
+    return {
+      gameId: gameIdStr,
+      player1: game.player1Wallet,
+      player2: game.player2Wallet,
+      phase: state?.phase ?? 'Waiting',
+      handNumber: state?.handNumber ?? 0,
+      pot: state?.pot ?? 0,
+      player1ChipStack: state?.player1ChipStack ?? 1000,
+      player2ChipStack: state?.player2ChipStack ?? 1000,
+      bettingClosed: state?.bettingClosed ?? false,
+    };
+  });
+  res.json({ games });
+});
 
 const httpServer = app.listen(HTTP_PORT, () => {
   console.log(`Claw Poker HTTP server running on port ${HTTP_PORT}`);

@@ -1100,6 +1100,145 @@ export class AnchorClient {
     return txSig;
   }
 
+  // ─── ハンド決着・コミュニティカード公開・ショーダウン公開 ─────────────────
+
+  /**
+   * settle_hand命令を呼び出してハンドを決着させる。
+   * Fold後、Showdown後、AllInランアウト後に呼ぶ。
+   */
+  async settleHand(gameId: bigint, player1Wallet: PublicKey, player2Wallet: PublicKey): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
+    const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+    const activeProgram = await this.getActiveErProgram();
+
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        settleHand: (gameId: BN) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
+      })
+        .settleHand(new BN(gameId.toString()))
+        .accounts({
+          game: gamePda,
+          operator: operatorPubkey,
+          player1State: player1StatePda,
+          player2State: player2StatePda,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] settleHand for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
+
+    console.log(`[AnchorClient] Hand settled for game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * reveal_community_cards命令を呼び出してコミュニティカードを公開する。
+   * ベッティングラウンド終了後にFlop/Turn/Riverを段階的に公開する。
+   */
+  async revealCommunityCards(
+    gameId: bigint,
+    player1Wallet: PublicKey,
+    player2Wallet: PublicKey,
+    targetPhase: number,
+    boardCards: number[],
+  ): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
+    const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+    const activeProgram = await this.getActiveErProgram();
+
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        revealCommunityCards: (gameId: BN, phase: Record<string, unknown>, boardCards: number[]) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
+      })
+        .revealCommunityCards(
+          new BN(gameId.toString()),
+          this.encodeGamePhase(targetPhase),
+          boardCards,
+        )
+        .accounts({
+          game: gamePda,
+          operator: operatorPubkey,
+          player1State: player1StatePda,
+          player2State: player2StatePda,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] revealCommunityCards for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
+
+    console.log(`[AnchorClient] Community cards revealed for game ${gameId}, phase ${targetPhase}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * reveal_showdown_cards命令を呼び出してショーダウン時のホールカードをGameに公開コピーする。
+   */
+  async revealShowdownCards(
+    gameId: bigint,
+    player1Wallet: PublicKey,
+    player2Wallet: PublicKey,
+  ): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
+    const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+    const activeProgram = await this.getActiveErProgram();
+
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        revealShowdownCards: (gameId: BN) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
+      })
+        .revealShowdownCards(new BN(gameId.toString()))
+        .accounts({
+          game: gamePda,
+          operator: operatorPubkey,
+          player1State: player1StatePda,
+          player2State: player2StatePda,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] revealShowdownCards for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
+
+    console.log(`[AnchorClient] Showdown cards revealed for game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * GamePhaseインデックスをAnchorのenum表現に変換する。
+   * Anchor IDLではenumは { variantName: {} } 形式。
+   */
+  private encodeGamePhase(phaseIndex: number): Record<string, unknown> {
+    const phaseNames = ['waiting', 'shuffling', 'preFlop', 'flop', 'turn', 'river', 'showdown', 'finished'];
+    const name = phaseNames[phaseIndex] ?? 'waiting';
+    return { [name]: {} };
+  }
+
   /**
    * x402支払い検証後にオペレーターが呼び出すキュー登録命令。
    * SOL転送はx402プロトコルが担当し、このメソッドはキュー登録のみ行う。

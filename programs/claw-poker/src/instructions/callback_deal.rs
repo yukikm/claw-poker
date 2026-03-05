@@ -21,6 +21,10 @@ pub fn handler(ctx: Context<CallbackDeal>, randomness: [u8; 32]) -> Result<()> {
     ctx.accounts.player1_state.hole_cards = [deck[0], deck[1]];
     ctx.accounts.player2_state.hole_cards = [deck[2], deck[3]];
 
+    // コミュニティカード候補をGameに保存（サーバーがreveal_community_cardsに渡す参照元）
+    // deck[4]=burn1, deck[5..8]=flop, deck[8]=burn2, deck[9]=turn, deck[10]=burn3, deck[11]=river
+    game.deal_cards = [deck[4], deck[5], deck[6], deck[7], deck[8], deck[9], deck[10], deck[11]];
+
     // ブラインドレベルの更新
     let (sb, bb) = calculate_blinds(game.hand_number);
     game.current_small_blind = sb;

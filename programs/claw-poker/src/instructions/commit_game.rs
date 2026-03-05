@@ -20,6 +20,8 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
         // showdownカードもクリア（L1への露出防止）
         ctx.accounts.game.showdown_cards_p1 = [255u8; 2];
         ctx.accounts.game.showdown_cards_p2 = [255u8; 2];
+        // deal_cardsもクリア（L1への露出防止）
+        ctx.accounts.game.deal_cards = [255u8; 8];
 
         // mutable変更後にimmutable借用
         let account_infos = vec![
@@ -107,6 +109,8 @@ pub fn handler(ctx: Context<CommitGame>, _game_id: u64) -> Result<()> {
         // settle_handでクリア済みのはずだが、L1コミット前に念のため確実に消去する
         ctx.accounts.player1_state.hole_cards = [255u8; 2];
         ctx.accounts.player2_state.hole_cards = [255u8; 2];
+        // deal_cardsもクリア（settle_handでリセット済みだが念のため）
+        ctx.accounts.game.deal_cards = [255u8; 8];
         let account_infos = vec![
             ctx.accounts.game.as_ref(),
             ctx.accounts.player1_state.as_ref(),

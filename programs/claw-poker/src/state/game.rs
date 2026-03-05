@@ -72,6 +72,10 @@ pub struct Game {
     pub player1_is_all_in: bool,
     /// Player2がオールインしたか（ハンド終了時にリセット）
     pub player2_is_all_in: bool,
+    /// callback_dealで設定されるコミュニティカード候補（burn1, flop*3, burn2, turn, burn3, river）
+    /// サーバーがreveal_community_cardsに渡すカード値の参照元。
+    /// settle_handで[255; 8]にリセットされる。
+    pub deal_cards: [u8; 8],
     /// PDAバンプ
     pub bump: u8,
 }

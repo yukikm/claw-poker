@@ -2166,7 +2166,7 @@
         {
           "name": "oracle_queue",
           "writable": true,
-          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+          "address": "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc"
         },
         {
           "name": "program_identity",
@@ -3255,6 +3255,20 @@
               "Player2がオールインしたか（ハンド終了時にリセット）"
             ],
             "type": "bool"
+          },
+          {
+            "name": "deal_cards",
+            "docs": [
+              "callback_dealで設定されるコミュニティカード候補（burn1, flop*3, burn2, turn, burn3, river）",
+              "サーバーがreveal_community_cardsに渡すカード値の参照元。",
+              "settle_handで[255; 8]にリセットされる。"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
           },
           {
             "name": "bump",

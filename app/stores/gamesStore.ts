@@ -5,6 +5,9 @@ import { type GamePhase } from '@/lib/constants';
 import { getReadOnlyProgram } from '@/lib/anchor';
 import { getERConnection } from '@/lib/solana';
 
+/** サーバーHTTP APIのベースURL（プライベートERゲーム取得用） */
+const SERVER_API_URL = process.env.NEXT_PUBLIC_SERVER_API_URL ?? 'http://43.206.193.46:3001';
+
 export interface GamesStats {
   totalGames: number;
   activeGames: number;
@@ -71,10 +74,30 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
       const erProgram = getReadOnlyProgram(erConnection);
       const l1Program = getReadOnlyProgram(connection);
 
-      const [erGameAccounts, l1GameAccounts, poolAccounts] = await Promise.all([
+      // サーバーAPIからプライベートER上のアクティブゲームを取得
+      // プライベートERにデリゲーションされたゲームは公開ERに存在しないため、
+      // サーバーが保持するactiveGames情報をマージする。
+      interface ServerGame {
+        gameId: string;
+        player1: string;
+        player2: string;
+        phase: string;
+        handNumber: number;
+        pot: number;
+        player1ChipStack: number;
+        player2ChipStack: number;
+        bettingClosed: boolean;
+      }
+      const serverGamesPromise: Promise<ServerGame[]> = fetch(`${SERVER_API_URL}/api/v1/games`)
+        .then((r) => r.json() as Promise<{ games: ServerGame[] }>)
+        .then((data) => data.games)
+        .catch(() => [] as ServerGame[]);
+
+      const [erGameAccounts, l1GameAccounts, poolAccounts, serverGames] = await Promise.all([
         erProgram.account.game.all().catch(() => []),
         l1Program.account.game.all().catch(() => []),
         l1Program.account.bettingPool.all().catch(() => []),
+        serverGamesPromise,
       ]);
 
       // ER と L1 のゲームをマージ（gameId をキーに重複排除。ER を優先）
@@ -134,6 +157,41 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
           };
         }
       );
+
+      // サーバーAPIのプライベートERゲームをマージ（ER/L1に存在しないゲームのみ追加）
+      const existingGameIds = new Set(games.map((g) => g.gameId.toString()));
+      for (const sg of serverGames) {
+        if (existingGameIds.has(sg.gameId)) continue;
+        const gameIdBigInt = BigInt(sg.gameId);
+        const phaseMap: Record<string, GamePhase> = {
+          Waiting: 'Waiting', Shuffling: 'Shuffling', PreFlop: 'PreFlop',
+          Flop: 'Flop', Turn: 'Turn', River: 'River', Showdown: 'Showdown', Finished: 'Finished',
+        };
+        const phase = phaseMap[sg.phase] ?? 'Waiting';
+        const [gamePda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('game'), gameIdToBuffer(gameIdBigInt)],
+          programId,
+        );
+        const [bettingPoolPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('betting_pool'), gameIdToBuffer(gameIdBigInt)],
+          programId,
+        );
+        const isBettable = !sg.bettingClosed
+          && (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn' || phase === 'River');
+        games.push({
+          gameId: gameIdBigInt,
+          gamePda,
+          phase,
+          handNumber: sg.handNumber,
+          player1: new PublicKey(sg.player1),
+          player2: new PublicKey(sg.player2),
+          pot: sg.pot,
+          winner: null,
+          bettingPoolPda,
+          isBettable,
+          bettingClosed: sg.bettingClosed,
+        });
+      }
 
       // Compute aggregate statistics
       const totalBetsLamports = Array.from(poolMap.values()).reduce((s, p) => s + p.totalBets, 0);

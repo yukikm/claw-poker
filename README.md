@@ -375,3 +375,7 @@ Step 4800/5343
 Idl account created: 4wAZ7T2kc5tf6cx52PKuUjLAg2jwzJ1iWyGtcTjoH7qT
 Deploy success
 ```
+
+```
+anchor deploy --provider.cluster devnet
+```
