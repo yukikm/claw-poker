@@ -61,3 +61,17 @@ const sig = await sendAndConfirmTransaction(erConnection, tx, [signer], {
 2. **`gameMonitor.ts` triggerBurstPoll off-by-one修正**: `remaining--` が先に実行され、最後のコールバックでポーリングせずreturnしていた（10回指定で9回しか実行されない）。ポーリング実行後にデクリメントするよう修正。
 3. **`index.ts` waitingCrankExecutedAtHand リトライ不能バグ修正**: `requestShuffle` 失敗時に `waitingCrankExecutedAtHand.delete()` した直後、内側try-catchの外で `waitingCrankExecutedAtHand.set()` が無条件実行され、VRFリクエスト失敗時のリトライが永久に不可能だった。`.set()` を成功パス内に移動。
 4. **`index.ts` 未使用インポート/変数削除**: `ServerMessage`（未使用import）、`DEFAULT_ENTRY_FEE`（未使用定数）を削除。
+
+## VRF/TEE修正 (2026-03-06)
+
+### VRFコールバック問題と対策
+- **問題**: VRFオラクルの`callback_deal`はPrivate ER (TEE)では動作しない。VRFオラクルがTEE認証を持たないため、game/player_stateアカウントに書き込めない。
+- **対策**: `request_shuffle`（Shufflingフェーズ遷移+hand_numberインクリメント用）は残すが、VRFコールバック待機を廃止。`request_shuffle`成功後すぐに`fallbackShuffleAndDeal`（test_shuffle_and_deal）を呼ぶ。
+- **削除したコード**: `VRF_CALLBACK_TIMEOUT_MS`, `vrfFallbackTimers`, `vrfFallbackExecuted`, `executeVrfFallback`関数, Shuffling→PreFlop VRFタイマーキャンセル処理
+
+### TEEフォールバック除去
+- **問題**: TEE接続失敗時に公開ERにフォールバックするが、Private ER委譲済みアカウントは公開ERには存在しない。
+- **対策**: `getReadConnection()`は`Connection | null`を返すように変更。TEE接続不可時はnullを返し、呼び出し元でハンドリング。`getPlayerHoleCards()`も公開ERフォールバックを除去。
+
+### バーストポーリングのログ修正
+- 「after StructError」→「after crank execution」に変更（StructError問題は既に解消済みのため）

@@ -435,18 +435,14 @@ export class AnchorClient {
 
   /**
    * 読み取り用の最適な接続を返す。
-   * Private ER委譲後はアカウントがTEE上にのみ存在するため、TEE接続を優先する。
-   * TEE接続が取得できない場合のみ公開ERにフォールバックする（ログ付き）。
+   * Private ER委譲後はアカウントがTEE上にのみ存在するため、TEE接続を返す。
+   * TEE接続が取得できない場合はnullを返す（公開ERにはアカウントが存在しない）。
+   * TEE RPC URLが未設定の場合のみ公開ERを返す（開発環境向け）。
    */
-  async getReadConnection(): Promise<Connection> {
+  async getReadConnection(): Promise<Connection | null> {
     if (!this.teeRpcUrl) return this.erConnection;
-    try {
-      const teeConn = await this.getTeeConnection();
-      if (teeConn) return teeConn;
-    } catch (err) {
-      console.warn('[AnchorClient] TEE connection failed for read, falling back to public ER (data may be unavailable):', err);
-    }
-    return this.erConnection;
+    const teeConn = await this.getTeeConnection();
+    return teeConn;
   }
 
   getOperatorPublicKey(): PublicKey {
@@ -936,7 +932,9 @@ export class AnchorClient {
   }
 
   /**
-   * VRFシャッフルを要求し、callback_dealでホールカード配布・PreFlop遷移を開始する。
+   * VRFシャッフルを要求し、Shufflingフェーズに遷移する。hand_numberをインクリメントする。
+   * Private ERではVRFオラクルがcallbackを配信できないため、
+   * 呼び出し後に即座にfallbackShuffleAndDealを実行する。
    */
   async requestShuffle(
     gameId: bigint,
@@ -973,9 +971,9 @@ export class AnchorClient {
   }
 
   /**
-   * VRFコールバック（callback_deal）がタイムアウトした場合のフォールバック。
+   * request_shuffle後にデッキシャッフルとホールカード配布を実行する。
    * サーバー側で暗号学的乱数を生成し、test_shuffle_and_deal命令を直接呼び出す。
-   * フェーズがShuffling（requestShuffle後、callback_deal未到着）の場合にのみ使用。
+   * フェーズがShuffling（requestShuffle実行済み）の場合にのみ使用可能。
    * Waitingフェーズからの呼び出しはオンチェーン制約により拒否される（VRFバイパス防止）。
    */
   async fallbackShuffleAndDeal(
@@ -1257,6 +1255,9 @@ export class AnchorClient {
 
     // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
     const readConn = await this.getReadConnection();
+    if (!readConn) {
+      throw new Error(`TEE connection unavailable for commitGameCheckpoint gameId ${gameId}`);
+    }
     const gameAccount = await readConn.getAccountInfo(gamePda, 'confirmed');
     if (!gameAccount || gameAccount.data.length < 8) {
       throw new Error(`Game account not found or not initialized for gameId ${gameId}`);
@@ -1324,6 +1325,15 @@ export class AnchorClient {
       try {
         // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
         const readConn = await this.getReadConnection();
+        if (!readConn) {
+          if (attempt < MAX_RETRIES) {
+            console.warn(`[AnchorClient] TEE connection unavailable for fetchGamePotAndStacks attempt ${attempt}/${MAX_RETRIES}`);
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] TEE connection unavailable for fetchGamePotAndStacks after ${MAX_RETRIES} retries`);
+          return null;
+        }
         const accountInfo = await readConn.getAccountInfo(gamePda, 'confirmed');
         if (!accountInfo || accountInfo.data.length < 8) {
           if (attempt < MAX_RETRIES) {
@@ -1571,22 +1581,23 @@ export class AnchorClient {
           // 優先: プレイヤー自身のTEEトークン（公式PERモデル準拠）
           connection = playerCached.connection;
         } else {
-          // フォールバック: オペレーターTEE接続
-          try {
-            const teeConn = await this.getTeeConnection();
-            if (teeConn) {
-              if (attempt === 1) {
-                console.warn(
-                  `[AnchorClient] Player TEE token not set for ${playerWallet.toBase58()}, ` +
-                  'using operator TEE (privacy degraded - player should respond to tee_auth_challenge)',
-                );
-              }
+          // フォールバック: オペレーターTEE接続（公開ERにはPlayerStateが存在しないためフォールバックしない）
+          const teeConn = await this.getTeeConnection();
+          if (!teeConn) {
+            if (attempt < MAX_RETRIES) {
+              await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+              continue;
             }
-            connection = teeConn ?? this.erConnection;
-          } catch (teeErr) {
-            console.warn('[AnchorClient] TEE auth failed, falling back to ER connection:', teeErr);
-            connection = this.erConnection;
+            console.warn(`[AnchorClient] TEE connection unavailable for ${playerWallet.toBase58()}`);
+            return null;
           }
+          if (attempt === 1) {
+            console.warn(
+              `[AnchorClient] Player TEE token not set for ${playerWallet.toBase58()}, ` +
+              'using operator TEE (privacy degraded - player should respond to tee_auth_challenge)',
+            );
+          }
+          connection = teeConn;
         }
 
         const accountInfo = await connection.getAccountInfo(playerStatePda, 'confirmed');

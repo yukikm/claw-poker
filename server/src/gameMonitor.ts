@@ -51,9 +51,9 @@ export type TeeConnectionRefresher = () => Promise<Connection | null>;
 const POLL_INTERVAL_MS = 3_000;
 /** TEE WebSocket健全性チェック間隔 */
 const TEE_HEALTH_CHECK_INTERVAL_MS = 30_000;
-/** StructError後のバーストポーリング間隔 */
+/** クランク実行後のバーストポーリング間隔 */
 const BURST_POLL_INTERVAL_MS = 500;
-/** StructError後のバーストポーリング回数 */
+/** クランク実行後のバーストポーリング回数 */
 const BURST_POLL_COUNT = 10;
 
 export class GameMonitor {
@@ -68,7 +68,7 @@ export class GameMonitor {
     lastUpdateAt: number;
   }>();
 
-  /** StructError後のバーストポーリングタイマー（gameId → timer） */
+  /** クランク実行後のバーストポーリングタイマー（gameId → timer） */
   private burstPollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** TEE接続リフレッシュ用コールバック（index.tsから注入） */
@@ -486,7 +486,7 @@ export class GameMonitor {
   }
 
   /**
-   * StructError発生後に呼ばれる。指定ゲームのポーリングを短間隔（500ms）で最大10回実行し、
+   * クランク実行後に呼ばれる。指定ゲームのポーリングを短間隔（500ms）で最大10回実行し、
    * トランザクション実行後のオンチェーン状態変化を確実にキャプチャする。
    * 既にバーストポーリング中の場合はリセットして再開する。
    */
@@ -504,7 +504,7 @@ export class GameMonitor {
       this.burstPollTimers.delete(gameId);
     }
 
-    console.log(`[GameMonitor] Game ${gameId}: starting burst poll (${BURST_POLL_COUNT}x every ${BURST_POLL_INTERVAL_MS}ms) after StructError`);
+    console.log(`[GameMonitor] Game ${gameId}: starting burst poll (${BURST_POLL_COUNT}x every ${BURST_POLL_INTERVAL_MS}ms) after crank execution`);
 
     let remaining = BURST_POLL_COUNT;
     const burstTimer = setInterval(() => {
@@ -539,7 +539,7 @@ export class GameMonitor {
 
   /**
    * 指定ゲームの状態を即座にポーリングする（lastUpdateAtチェックを無視）。
-   * StructErrorリカバリーや外部からの強制ポーリングに使用する。
+   * クランク実行後のリカバリーや外部からの強制ポーリングに使用する。
    */
   async forcePollGameState(
     gameId: string,

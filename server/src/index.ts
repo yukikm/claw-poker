@@ -84,13 +84,6 @@ const waitingCrankInFlight = new Set<string>();
 const bettingEndCrankInFlight = new Set<string>();
 /** ベッティングラウンド終了クランク実行済みフラグ（gameId → "phase:handNumber"） */
 const bettingEndCrankExecuted = new Map<string, string>();
-/** VRFフォールバックタイマー（gameId → setTimeout handle）
- * requestShuffle後にcallback_dealがタイムアウトした場合にフォールバック実行する */
-const vrfFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
-/** VRFフォールバック実行済みフラグ（gameId → handNumber）：同一ハンドで重複フォールバック防止 */
-const vrfFallbackExecuted = new Map<string, number>();
-/** VRFコールバック待機タイムアウト（秒）。この時間内にcallback_dealが来なければフォールバック */
-const VRF_CALLBACK_TIMEOUT_MS = 10_000;
 
 const matchmakingQueue: QueueEntry[] = [];
 
@@ -253,9 +246,9 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
   }
 
   // フェーズチェック: Waiting/Shuffling中のアクション送信を防ぐ。
-  // VRF callbackがPreFlopへ遷移するまではアクション送信不可。
+  // fallbackShuffleAndDealがPreFlopへ遷移するまではアクション送信不可。
   // これがないと、initializeGame直後にcurrentTurnが設定されたエージェントが
-  // 即座にアクションを送り、ゲーム状態を破壊してVRF callbackが永久に失敗する。
+  // 即座にアクションを送り、ゲーム状態を破壊する。
   const currentPhase = prevGameStates.get(gameIdStr);
   if (currentPhase) {
     const playingPhases = new Set(['PreFlop', 'Flop', 'Turn', 'River']);
@@ -550,46 +543,6 @@ async function initializeOnChainGame(
   }
 }
 
-// ─── VRFフォールバック実行 ────────────────────────────────────────────────────
-
-/**
- * VRFコールバック（callback_deal）がタイムアウトした場合のフォールバック。
- * サーバー側で暗号学的乱数を生成し、test_shuffle_and_deal命令を直接呼び出す。
- * フェーズがShufflingのまま停止している場合に呼ばれる。
- */
-async function executeVrfFallback(
-  gameId: bigint,
-  gameIdStr: string,
-  player1: PublicKey,
-  player2: PublicKey,
-): Promise<void> {
-  // 同一ハンドで重複フォールバック防止
-  const currentState = prevGameStates.get(gameIdStr);
-  const handNum = currentState?.handNumber ?? 0;
-  if (vrfFallbackExecuted.get(gameIdStr) === handNum) {
-    return;
-  }
-
-  // フェーズがShuffling以外なら不要（既にcallback_dealが到着済みか、まだrequest_shuffle未実行）
-  // Waitingフェーズでのフォールバックはオンチェーン制約でも拒否される（VRFバイパス防止）
-  if (currentState && currentState.phase !== 'Shuffling') {
-    console.log(`[VRF Fallback] Game ${gameIdStr}: phase is ${currentState.phase}, skipping fallback`);
-    return;
-  }
-
-  vrfFallbackExecuted.set(gameIdStr, handNum);
-
-  try {
-    console.log(`[VRF Fallback] Game ${gameIdStr}: VRF callback timed out, executing fallback shuffle (hand ${handNum})`);
-    await anchorClient.fallbackShuffleAndDeal(gameId, player1, player2);
-    console.log(`[VRF Fallback] Game ${gameIdStr}: fallback shuffle completed successfully`);
-  } catch (err) {
-    console.error(`[VRF Fallback] Game ${gameIdStr}: fallback shuffle failed:`, err);
-    // フォールバックも失敗した場合、再試行可能にするためフラグをクリア
-    vrfFallbackExecuted.delete(gameIdStr);
-  }
-}
-
 // ─── ゲーム状態更新コールバック ──────────────────────────────────────────────
 
 async function onGameStateUpdate(
@@ -624,41 +577,16 @@ async function onGameStateUpdate(
         const p1 = new PublicKey(player1Wallet);
         const p2 = new PublicKey(player2Wallet);
         const clientSeed = Math.floor(Math.random() * 256);
-        try {
-          await anchorClient.requestShuffle(gameId, p1, p2, clientSeed);
-          // VRFコールバック待機タイマー開始:
-          // callback_dealが一定時間内に到着しなければフォールバック実行
-          const existingFallbackTimer = vrfFallbackTimers.get(gameIdStr);
-          if (existingFallbackTimer) clearTimeout(existingFallbackTimer);
-          const fallbackTimer = setTimeout(() => {
-            vrfFallbackTimers.delete(gameIdStr);
-            void executeVrfFallback(gameId, gameIdStr, p1, p2);
-          }, VRF_CALLBACK_TIMEOUT_MS);
-          vrfFallbackTimers.set(gameIdStr, fallbackTimer);
-          waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
-        } catch (vrfErr) {
-          // VRFリクエスト自体が失敗した場合。
-          // request_shuffleが失敗 = オンチェーンでShufflingに遷移していないため、
-          // フォールバック(test_shuffle_and_deal)もShuffling制約で拒否される。
-          // 次回のonGameStateUpdateループで再度request_shuffleを試行する。
-          console.error(`[Crank] VRF request failed for game ${gameIdStr}, will retry on next state update:`, vrfErr);
-        }
+        // request_shuffleでShufflingフェーズに遷移 + hand_numberインクリメント
+        await anchorClient.requestShuffle(gameId, p1, p2, clientSeed);
+        // VRFコールバックはPrivate ERでは動作しないため、即座にフォールバックシャッフルを実行
+        await anchorClient.fallbackShuffleAndDeal(gameId, p1, p2);
+        waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
       } catch (err) {
         console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
       } finally {
         waitingCrankInFlight.delete(gameIdStr);
       }
-    }
-  }
-
-  // Shuffling → PreFlop遷移を検知したらVRFフォールバックタイマーをキャンセル
-  // （callback_dealが正常に到着した場合）
-  if (prevState?.phase === 'Shuffling' && state.phase === 'PreFlop') {
-    const fallbackTimer = vrfFallbackTimers.get(gameIdStr);
-    if (fallbackTimer) {
-      clearTimeout(fallbackTimer);
-      vrfFallbackTimers.delete(gameIdStr);
-      console.log(`[VRF] Game ${gameIdStr}: callback_deal arrived, cancelled VRF fallback timer`);
     }
   }
 
@@ -724,7 +652,7 @@ async function onGameStateUpdate(
         // River終了は player_action.rs で phase=Showdown に設定されるため、
         // ここではなく isShowdown ブランチで処理される
       }
-      // StructErrorで成功扱いされた場合、GameMonitorに状態変化が通知されない可能性がある。
+      // クランク実行後、GameMonitorに状態変化が通知されない可能性がある。
       // バーストポーリングで確実にオンチェーン状態をキャプチャする。
       gameMonitor.triggerBurstPoll(gameIdStr);
       bettingEndCrankExecuted.set(gameIdStr, crankKey);
@@ -858,7 +786,7 @@ async function onGameStateUpdate(
   // ターン変更時のみyour_turnを送信（Waiting/Shuffling/Showdown/Finishedフェーズ中は送信しない）
   // Waiting/Shufflingではカードが配られておらず、アクション送信は不正。
   // initializeGame直後のfetchInitialStateでcurrentTurnが設定済みでも、
-  // VRF callback (callback_deal) がPreFlopへ遷移するまで待機する必要がある。
+  // fallbackShuffleAndDealがPreFlopへ遷移するまで待機する必要がある。
   const turnChanged = prevState?.currentTurn !== state.currentTurn;
   const isPlayingPhase = state.phase === 'PreFlop' || state.phase === 'Flop'
     || state.phase === 'Turn' || state.phase === 'River';
@@ -870,8 +798,8 @@ async function onGameStateUpdate(
   // 1. プレイ中フェーズ（PreFlop/Flop/Turn/River）であること
   // 2. 以下のいずれかが成立:
   //    a) ターンが変わった（通常のアクション後）
-  //    b) 非プレイ中フェーズからプレイ中フェーズに遷移した（VRF callback後のPreFlop開始時）
-  //       initializeGameでcurrentTurn=player1、callback_dealでもcurrentTurn=player1の場合、
+  //    b) 非プレイ中フェーズからプレイ中フェーズに遷移した（fallbackShuffleAndDeal後のPreFlop開始時）
+  //       initializeGameでcurrentTurn=player1、fallbackShuffleAndDealでもcurrentTurn=player1の場合、
   //       turnChangedがfalseになるため、フェーズ遷移でもyour_turnを送信する必要がある
   if ((isPlayer1Turn || isPlayer2Turn) && (turnChanged || prevWasNotPlaying) && isPlayingPhase) {
     const activeWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
@@ -935,7 +863,7 @@ async function onGameStateUpdate(
         const timedOutPlayer = new PublicKey(currentTurnWallet);
         console.log(`[Timeout] Game ${gameIdStr}: ${currentTurnWallet} timed out, calling handle_timeout`);
         await anchorClient.handleTimeout(gameId, timedOutPlayer);
-        // StructErrorで確認失敗の可能性があるため、バーストポーリングで状態変化をキャプチャ
+        // トランザクション確認失敗の可能性があるため、バーストポーリングで状態変化をキャプチャ
         gameMonitor.triggerBurstPoll(gameIdStr);
       } catch (err) {
         console.error(`[Timeout] Failed to handle timeout for game ${gameIdStr}:`, err);
@@ -1087,9 +1015,6 @@ async function handleGameComplete(
   waitingCrankInFlight.delete(gameIdStr);
   bettingEndCrankInFlight.delete(gameIdStr);
   bettingEndCrankExecuted.delete(gameIdStr);
-  const vrfTimer = vrfFallbackTimers.get(gameIdStr);
-  if (vrfTimer) { clearTimeout(vrfTimer); vrfFallbackTimers.delete(gameIdStr); }
-  vrfFallbackExecuted.delete(gameIdStr);
   prevGameStates.delete(gameIdStr);
   currentHandActions.delete(gameIdStr);
   handStartChips.delete(gameIdStr);
