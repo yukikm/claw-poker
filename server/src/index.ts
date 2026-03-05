@@ -20,9 +20,9 @@ const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.
 const MAGICBLOCK_ER_URL = process.env.MAGICBLOCK_ER_URL ?? 'https://devnet.magicblock.app';
 
 /** HTTP APIの公開URL（SKILL.mdのURL置換に使用） */
-const PUBLIC_HTTP_URL = process.env.PUBLIC_HTTP_URL ?? `http://44.202.211.62:${HTTP_PORT}`;
+const PUBLIC_HTTP_URL = process.env.PUBLIC_HTTP_URL ?? `http://43.206.193.46:${HTTP_PORT}`;
 /** WebSocketの公開URL（SKILL.mdのURL置換に使用） */
-const PUBLIC_WS_URL = process.env.PUBLIC_WS_URL ?? `ws://44.202.211.62:${PORT}`;
+const PUBLIC_WS_URL = process.env.PUBLIC_WS_URL ?? `ws://43.206.193.46:${PORT}`;
 
 /** デフォルト参加費 (0.1 SOL in lamports) */
 const DEFAULT_ENTRY_FEE = 100_000_000;
@@ -909,11 +909,11 @@ app.use(express.json());
 // OpenClaw など x402 対応エージェントが AgentSkill として読み込む。
 //
 // 使用方法:
-//   curl http://44.202.211.62:3001/skill
+//   curl http://43.206.193.46:3001/skill
 //
 // 環境変数:
-//   PUBLIC_HTTP_URL  HTTP API の公開ベースURL（デフォルト: http://44.202.211.62:3001）
-//   PUBLIC_WS_URL    WebSocket の公開URL      （デフォルト: ws://44.202.211.62:8080）
+//   PUBLIC_HTTP_URL  HTTP API の公開ベースURL（デフォルト: http://43.206.193.46:3001）
+//   PUBLIC_WS_URL    WebSocket の公開URL      （デフォルト: ws://43.206.193.46:8080）
 // ────────────────────────────────────────────────────────────────────────────
 const SKILL_TEMPLATE_PATH = join(__dirname, '../../skills/claw-poker-player/SKILL.md');
 

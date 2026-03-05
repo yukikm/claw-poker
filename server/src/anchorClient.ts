@@ -103,6 +103,9 @@ export class AnchorClient {
   /** TEE認証トークンの有効期限バッファ（5分前に再取得） */
   private static readonly TEE_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
   private static readonly TEE_DEFAULT_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+  private static readonly DEVNET_TEE_FALLBACK_HOST = 'devnet-tee.magicblock.app';
+  private static readonly TEE_PRIMARY_HOST = 'tee.magicblock.app';
+  private readonly allowDevnetTeeFallback: boolean;
 
   constructor(rpcUrl: string, erRpcUrl: string) {
     this.l1Connection = new Connection(rpcUrl, 'confirmed');
@@ -139,6 +142,8 @@ export class AnchorClient {
     this.l1Program = new Program(IDL, l1Provider);
     this.erProgram = new Program(IDL, erProvider);
 
+    this.allowDevnetTeeFallback = (process.env.MAGICBLOCK_ENABLE_DEVNET_TEE_FALLBACK ?? '').toLowerCase() === 'true';
+
     // TEE RPC URL（Private Ephemeral Rollup用。未設定時はホールカード読み取りがERフォールバック）
     const rawTeeRpcUrl = process.env.MAGICBLOCK_TEE_RPC_URL;
     const rawTeeWsUrl = process.env.MAGICBLOCK_TEE_WS_URL;
@@ -150,6 +155,9 @@ export class AnchorClient {
       : null;
     if (this.teeRpcUrl) {
       console.log(`[AnchorClient] TEE RPC configured: ${this.teeRpcUrl}`);
+      if (this.allowDevnetTeeFallback) {
+        console.log('[AnchorClient] Devnet TEE fallback is enabled (MAGICBLOCK_ENABLE_DEVNET_TEE_FALLBACK=true)');
+      }
     } else {
       console.warn(
         '[AnchorClient] MAGICBLOCK_TEE_RPC_URL not set. ' +
@@ -195,11 +203,12 @@ export class AnchorClient {
     return parsed.toString().replace(/\/$/, '');
   }
 
-  private buildTeeRpcUrl(pathname = '', token?: string): string {
-    if (!this.teeRpcUrl) {
+  private buildTeeRpcUrl(pathname = '', token?: string, rpcBase?: string): string {
+    const base = rpcBase ?? this.teeRpcUrl;
+    if (!base) {
       throw new Error('MAGICBLOCK_TEE_RPC_URL is not configured');
     }
-    const url = new URL(this.teeRpcUrl);
+    const url = new URL(base);
     if (pathname) {
       const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
       url.pathname = `${url.pathname.replace(/\/+$/, '')}${normalizedPath}`;
@@ -211,6 +220,58 @@ export class AnchorClient {
       url.searchParams.set('token', token);
     }
     return url.toString();
+  }
+
+  private getDevnetTeeFallbackRpcBase(): string | null {
+    if (!this.allowDevnetTeeFallback) return null;
+    if (!this.teeRpcUrl) return null;
+    const current = new URL(this.teeRpcUrl);
+    if (current.hostname !== AnchorClient.TEE_PRIMARY_HOST) return null;
+    current.hostname = AnchorClient.DEVNET_TEE_FALLBACK_HOST;
+    current.search = '';
+    current.hash = '';
+    return current.toString().replace(/\/$/, '');
+  }
+
+  private shouldFallbackToDevnetTee(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    if (!lower.includes('http 403')) return false;
+    return lower.includes('access restricted')
+      || lower.includes('<!doctype html')
+      || lower.includes('<html');
+  }
+
+  private activateTeeFallbackEndpoint(nextRpcBase: string): void {
+    const previousRpcBase = this.teeRpcUrl;
+    if (!previousRpcBase || previousRpcBase === nextRpcBase) return;
+
+    let nextWsBase = this.teeWsUrl;
+    try {
+      if (nextWsBase) {
+        const previousWsUrl = new URL(nextWsBase);
+        const previousRpcUrl = new URL(previousRpcBase);
+        const nextRpcUrl = new URL(nextRpcBase);
+        if (previousWsUrl.hostname === previousRpcUrl.hostname) {
+          previousWsUrl.hostname = nextRpcUrl.hostname;
+          previousWsUrl.search = '';
+          previousWsUrl.hash = '';
+          nextWsBase = previousWsUrl.toString().replace(/\/$/, '');
+        }
+      }
+    } catch {
+      // ignore ws parse errors and keep original ws endpoint
+    }
+
+    this.teeRpcUrl = nextRpcBase;
+    this.teeWsUrl = nextWsBase;
+    this.teeAuthCache = null;
+    this.cachedTeeProgram = null;
+    this.playerTeeConnections.clear();
+    console.warn(
+      `[AnchorClient] Switched TEE endpoint to ${nextRpcBase} ` +
+      `(fallback from ${previousRpcBase} after access restriction)`,
+    );
   }
 
   private buildTeeWsUrl(token: string): string | undefined {
@@ -234,14 +295,18 @@ export class AnchorClient {
   ): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set('Accept', 'application/json');
-    headers.set('solana-client', 'claw-poker-server');
 
     const response = await fetch(url, { ...init, headers });
     const body = await response.text();
     const contentType = response.headers.get('content-type') ?? '';
+    const server = response.headers.get('server') ?? '-';
+    const cfRay = response.headers.get('cf-ray') ?? '-';
 
     if (!response.ok) {
-      throw new Error(`${context} HTTP ${response.status} (${url}): ${body.slice(0, 200)}`);
+      throw new Error(
+        `${context} HTTP ${response.status} (${url}) ` +
+        `[server=${server} cf-ray=${cfRay}]: ${body.slice(0, 200)}`,
+      );
     }
     if (!contentType.includes('application/json')) {
       throw new Error(
@@ -259,11 +324,27 @@ export class AnchorClient {
   private async requestTeeChallenge(pubkey: PublicKey): Promise<string> {
     const challengeUrl = new URL(this.buildTeeRpcUrl('/auth/challenge'));
     challengeUrl.searchParams.set('pubkey', pubkey.toBase58());
-    const challengeJson = await this.fetchTeeJson<TeeChallengeResponse>(
-      challengeUrl.toString(),
-      { method: 'GET' },
-      'TEE challenge',
-    );
+    let challengeJson: TeeChallengeResponse;
+    try {
+      challengeJson = await this.fetchTeeJson<TeeChallengeResponse>(
+        challengeUrl.toString(),
+        { method: 'GET' },
+        'TEE challenge',
+      );
+    } catch (primaryError) {
+      const fallbackBase = this.getDevnetTeeFallbackRpcBase();
+      if (!fallbackBase || !this.shouldFallbackToDevnetTee(primaryError)) {
+        throw primaryError;
+      }
+      const fallbackChallengeUrl = new URL(this.buildTeeRpcUrl('/auth/challenge', undefined, fallbackBase));
+      fallbackChallengeUrl.searchParams.set('pubkey', pubkey.toBase58());
+      challengeJson = await this.fetchTeeJson<TeeChallengeResponse>(
+        fallbackChallengeUrl.toString(),
+        { method: 'GET' },
+        'TEE challenge (devnet fallback)',
+      );
+      this.activateTeeFallbackEndpoint(fallbackBase);
+    }
     if (challengeJson.error) {
       throw new Error(`TEE challenge failed: ${challengeJson.error}`);
     }
@@ -278,19 +359,35 @@ export class AnchorClient {
     challenge: string,
     signatureBase58: string,
   ): Promise<{ token: string; expiresAt: number }> {
-    const loginJson = await this.fetchTeeJson<TeeLoginResponse>(
-      this.buildTeeRpcUrl('/auth/login'),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pubkey: pubkey.toBase58(),
-          challenge,
-          signature: signatureBase58,
-        }),
-      },
-      'TEE login',
-    );
+    const requestInit: RequestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pubkey: pubkey.toBase58(),
+        challenge,
+        signature: signatureBase58,
+      }),
+    };
+
+    let loginJson: TeeLoginResponse;
+    try {
+      loginJson = await this.fetchTeeJson<TeeLoginResponse>(
+        this.buildTeeRpcUrl('/auth/login'),
+        requestInit,
+        'TEE login',
+      );
+    } catch (primaryError) {
+      const fallbackBase = this.getDevnetTeeFallbackRpcBase();
+      if (!fallbackBase || !this.shouldFallbackToDevnetTee(primaryError)) {
+        throw primaryError;
+      }
+      loginJson = await this.fetchTeeJson<TeeLoginResponse>(
+        this.buildTeeRpcUrl('/auth/login', undefined, fallbackBase),
+        requestInit,
+        'TEE login (devnet fallback)',
+      );
+      this.activateTeeFallbackEndpoint(fallbackBase);
+    }
     if (!loginJson.token) {
       throw new Error(`TEE login failed: ${loginJson.error ?? 'no token received'}`);
     }

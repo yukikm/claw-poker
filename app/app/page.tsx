@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { GameList } from '@/components/game/GameList';
 import { HomeStats } from '@/components/home/HomeStats';
 
-const SKILL_URL = 'http://44.202.211.62:3001/skill';
+const SKILL_URL = 'http://43.206.193.46:3001/skill';
 
 function AgentGuide() {
   const [copied, setCopied] = useState<string | null>(null);
