@@ -1317,8 +1317,8 @@ export class AnchorClient {
    * TEE接続失敗時は公開ERにフォールバックせず、リトライ後にnullを返す。
    */
   async fetchGamePotAndStacks(gameId: bigint): Promise<{ pot: number; player1ChipStack: number; player2ChipStack: number } | null> {
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY_MS = 500;
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY_MS = 800;
     const [gamePda] = this.deriveGamePda(gameId);
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -1344,27 +1344,56 @@ export class AnchorClient {
           return null;
         }
 
-        let decoded: {
-          pot: { toNumber: () => number };
-          player1ChipStack?: { toNumber: () => number };
-          player2ChipStack?: { toNumber: () => number };
-        };
-        try {
-          decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as typeof decoded;
-        } catch {
+        // delegation中はownerがDELEGATION_PROGになっている場合がある
+        const ownerStr = accountInfo.owner.toBase58();
+        if (ownerStr === DELEGATION_PROG.toBase58()) {
           if (attempt < MAX_RETRIES) {
+            console.warn(`[AnchorClient] Game account owned by delegation program (delegation in progress), attempt ${attempt}/${MAX_RETRIES}`);
             await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
             continue;
           }
-          console.warn(`[AnchorClient] Game account not decodable for ${gameId} after ${MAX_RETRIES} retries (account may not be initialized yet)`);
+          console.warn(`[AnchorClient] Game account still owned by delegation program after ${MAX_RETRIES} retries`);
           return null;
         }
 
-        return {
-          pot: decoded.pot.toNumber(),
-          player1ChipStack: decoded.player1ChipStack?.toNumber() ?? 0,
-          player2ChipStack: decoded.player2ChipStack?.toNumber() ?? 0,
-        };
+        const data = accountInfo.data;
+        // Game account raw binary layout (IDL: claw_poker v0.1.0, fixed offsets before Option<Pubkey>):
+        // [8 disc][8 game_id][32 operator][32 platform][32 p1][32 p2][8 buy_in][8 pot][32 turn]
+        // [1 phase][5 board][32 deck][8 p1_committed][8 p2_committed][8 hand_number][1 dealer]
+        // [8 sb][8 bb][8 p1_chips][8 p2_chips] = 287 bytes
+        // Note: pot=152, p1_chips=271, p2_chips=279 はすべてOption<Pubkey>(winner)より前の固定領域
+        const MIN_GAME_SIZE = 287; // pot(152) + ... + p2_chips(279) + 8 = 287
+        if (data.length < MIN_GAME_SIZE) {
+          if (attempt < MAX_RETRIES) {
+            console.warn(`[AnchorClient] Game account data too short (${data.length} < ${MIN_GAME_SIZE}), attempt ${attempt}/${MAX_RETRIES}`);
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] Game account data too short for ${gameId} after ${MAX_RETRIES} retries (len=${data.length})`);
+          return null;
+        }
+
+        // Discriminator check (Game: [27, 90, 166, 125, 74, 100, 121, 18])
+        // delegation過渡期にデータが不整合になる場合があるためリトライで回避する
+        const GAME_DISC = Buffer.from([27, 90, 166, 125, 74, 100, 121, 18]);
+        if (!data.subarray(0, 8).equals(GAME_DISC)) {
+          if (attempt < MAX_RETRIES) {
+            const hexDisc = data.subarray(0, 8).toString('hex');
+            console.warn(`[AnchorClient] Game discriminator mismatch: got ${hexDisc}, attempt ${attempt}/${MAX_RETRIES}`);
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          const hexDisc = data.subarray(0, 8).toString('hex');
+          console.warn(`[AnchorClient] Game discriminator mismatch for ${gameId} after ${MAX_RETRIES} retries (disc=${hexDisc}, len=${data.length}, owner=${ownerStr})`);
+          return null;
+        }
+
+        // Raw binary parsing: fixed offsets
+        const pot = Number(data.readBigUInt64LE(152));            // offset 152
+        const player1ChipStack = Number(data.readBigUInt64LE(271)); // offset 271
+        const player2ChipStack = Number(data.readBigUInt64LE(279)); // offset 279
+
+        return { pot, player1ChipStack, player2ChipStack };
       } catch (err) {
         if (attempt < MAX_RETRIES) {
           console.warn(`[AnchorClient] fetchGamePotAndStacks attempt ${attempt}/${MAX_RETRIES} failed for ${gameId}:`, err);
@@ -1564,8 +1593,8 @@ export class AnchorClient {
     gameId: bigint,
     playerWallet: PublicKey,
   ): Promise<[string, string] | null> {
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY_MS = 500;
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY_MS = 800;
     const [playerStatePda] = this.derivePlayerStatePda(gameId, playerWallet);
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -1610,24 +1639,52 @@ export class AnchorClient {
           return null;
         }
 
-        let decoded: { holeCards: number[] };
-        try {
-          decoded = this.erProgram.coder.accounts.decode('PlayerState', accountInfo.data) as {
-            holeCards: number[];
-          };
-        } catch {
+        // delegation中はownerがDELEGATION_PROGになっている場合がある
+        const ownerStr = accountInfo.owner.toBase58();
+        if (ownerStr === DELEGATION_PROG.toBase58()) {
           if (attempt < MAX_RETRIES) {
+            console.warn(`[AnchorClient] PlayerState owned by delegation program (delegation in progress) for ${playerWallet.toBase58()}, attempt ${attempt}/${MAX_RETRIES}`);
             await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
             continue;
           }
-          console.warn(`[AnchorClient] PlayerState not decodable for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries (account may not be initialized yet)`);
+          console.warn(`[AnchorClient] PlayerState still owned by delegation program for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries`);
           return null;
         }
 
-        const cards = decoded.holeCards;
-        if (!cards || cards[0] === 255 || cards[1] === 255) return null;
+        const data = accountInfo.data;
+        // PlayerState raw binary layout:
+        // [8 disc][8 game_id][32 player][2 hole_cards][8 chip_stack][8 committed][8 pot_this_hand][1 folded][1 all_in][1 bump]
+        // delegation過渡期にデータが不整合になる場合があるためリトライで回避する
+        const PLAYER_STATE_DISC = Buffer.from([56, 3, 60, 86, 174, 16, 244, 195]);
+        const MIN_PLAYER_STATE_SIZE = 50; // 8(disc) + 8(game_id) + 32(player) + 2(hole_cards)
+        if (data.length < MIN_PLAYER_STATE_SIZE) {
+          if (attempt < MAX_RETRIES) {
+            console.warn(`[AnchorClient] PlayerState data too short (${data.length} < ${MIN_PLAYER_STATE_SIZE}) for ${playerWallet.toBase58()}, attempt ${attempt}/${MAX_RETRIES}`);
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] PlayerState data too short for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries (len=${data.length})`);
+          return null;
+        }
 
-        return [decodeCardToString(cards[0]), decodeCardToString(cards[1])];
+        if (!data.subarray(0, 8).equals(PLAYER_STATE_DISC)) {
+          if (attempt < MAX_RETRIES) {
+            const hexDisc = data.subarray(0, 8).toString('hex');
+            console.warn(`[AnchorClient] PlayerState discriminator mismatch: got ${hexDisc} for ${playerWallet.toBase58()}, attempt ${attempt}/${MAX_RETRIES}`);
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          const hexDisc = data.subarray(0, 8).toString('hex');
+          console.warn(`[AnchorClient] PlayerState discriminator mismatch for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries (disc=${hexDisc}, len=${data.length}, owner=${ownerStr})`);
+          return null;
+        }
+
+        // Raw binary parsing: hole_cards at offset 48 (8 disc + 8 game_id + 32 player)
+        const card0 = data.readUInt8(48);
+        const card1 = data.readUInt8(49);
+        if (card0 === 255 || card1 === 255) return null;
+
+        return [decodeCardToString(card0), decodeCardToString(card1)];
       } catch (err) {
         if (attempt < MAX_RETRIES) {
           console.warn(`[AnchorClient] getPlayerHoleCards attempt ${attempt}/${MAX_RETRIES} failed for ${playerWallet.toBase58()}:`, err);

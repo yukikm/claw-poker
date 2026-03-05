@@ -260,16 +260,15 @@ export class GameMonitor {
       const lastCheckpointHand = Number(data.readBigUInt64LE(offset));
       offset += 8;
 
-      // winner: Option<Pubkey> (1 byte tag + 32 bytes if Some)
+      // winner: Option<Pubkey> — Borsh: None=0x00 (1 byte), Some=0x01 + 32 bytes pubkey
       const winnerTag = data.readUInt8(offset);
       offset += 1;
       let winner: string | null = null;
       if (winnerTag === 1) {
         winner = new PublicKey(data.subarray(offset, offset + 32)).toBase58();
         offset += 32;
-      } else {
-        offset += 32;
       }
+      // None時はタグの1バイトのみ（32バイト分スキップしない）
 
       const bettingClosed = data.readUInt8(offset) === 1;
       offset += 1;
