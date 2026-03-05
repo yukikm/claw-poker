@@ -208,10 +208,13 @@ pub mod claw_poker {
         handle_timeout::handler(ctx, game_id)
     }
 
-    // テスト専用: VRFオラクルを経由せずデッキをシャッフルする
-    // 本番ではrequest_shuffle/callback_dealのVRFフローを使用すること
-    // anchor-debugフィーチャーが有効な場合のみビルドされる
-    #[cfg(feature = "anchor-debug")]
+    /// VRFオラクルを経由せずデッキをシャッフルする（フォールバック用）。
+    /// VRFコールバック（callback_deal）が一定時間内に到着しない場合、
+    /// サーバーがオペレーターとしてこの命令を呼び出す。
+    /// セキュリティ:
+    /// - operator制約: オペレーターのみ呼び出し可能
+    /// - Shufflingフェーズ制約: request_shuffle済み（VRFリクエスト発行済み）の場合のみ許可
+    /// - Waitingフェーズからの直接呼び出しはVRFバイパス攻撃となるため拒否
     pub fn test_shuffle_and_deal(
         ctx: Context<TestShuffleAndDeal>,
         game_id: u64,

@@ -1,24 +1,24 @@
-// このモジュール全体はanchor-debugフィーチャーが有効な場合のみコンパイルされる。
-// mod.rsおよびlib.rsの#[cfg(feature = "anchor-debug")]により制御される。
-// 本番ビルドでは `cargo build-bpf` (デフォルトフィーチャーのみ) を使用し、
-// このインストラクションが含まれないようにすること。
+// VRFフォールバック用 shuffle_and_deal 命令。
+// VRFコールバック（callback_deal）がPER上で一定時間内に到着しない場合に
+// サーバーがオペレーターとして呼び出す。
+// セキュリティ: operator制約によりオペレーターのみ呼び出し可能。
 use anchor_lang::prelude::*;
 use sha2::{Sha256, Digest};
 use crate::state::{Game, GamePhase, PlayerState};
 use crate::utils::{shuffle_deck, calculate_blinds};
 use crate::errors::PokerError;
 
-/// テスト専用のshuffle_and_deal命令。
+/// VRFフォールバック用 shuffle_and_deal 命令。
 /// VRFオラクルを経由せず、直接ランダムシードを受け取ってデッキをシャッフルする。
-/// `anchor-debug`フィーチャーフラグが有効な場合のみコンパイルされる。
+/// callback_deal が到着しない場合のフォールバックとして使用する。
 pub fn handler(ctx: Context<TestShuffleAndDeal>, _game_id: u64, random_seed: [u8; 32]) -> Result<()> {
     let game = &mut ctx.accounts.game;
 
-    // hand_numberをインクリメント
-    let next_hand = game.hand_number
-        .checked_add(1)
-        .ok_or(PokerError::PotOverflow)?;
-    game.hand_number = next_hand;
+    // フォールバックはShufflingフェーズ（request_shuffleでVRFリクエスト済み、
+    // callback_deal未到着）の場合のみ許可。Waitingフェーズからの直接呼び出しは
+    // VRFバイパス攻撃になるためアカウント制約で拒否する。
+    // request_shuffleで既にhand_numberがインクリメント済みなので再インクリメント不要。
+    let next_hand = game.hand_number;
 
     // Fisher-Yatesシャッフルでデッキをシャッフル
     let deck = shuffle_deck(&random_seed, next_hand);
@@ -118,6 +118,12 @@ pub fn handler(ctx: Context<TestShuffleAndDeal>, _game_id: u64, random_seed: [u8
     game.street_action_taken = false;
     game.phase = GamePhase::PreFlop;
 
+    // フォールバック使用を監査ログとして記録
+    emit!(VrfFallbackUsed {
+        game_id: game.game_id,
+        hand_number: next_hand,
+    });
+
     // ブラインド投入でAll-inが発生した場合のcurrent_turn補正
     if game.betting_closed {
         let bb_player = if sb_player_is_p1 { game.player2 } else { game.player1 };
@@ -142,6 +148,12 @@ pub fn handler(ctx: Context<TestShuffleAndDeal>, _game_id: u64, random_seed: [u8
     Ok(())
 }
 
+#[event]
+pub struct VrfFallbackUsed {
+    pub game_id: u64,
+    pub hand_number: u64,
+}
+
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct TestShuffleAndDeal<'info> {
@@ -149,7 +161,7 @@ pub struct TestShuffleAndDeal<'info> {
         mut,
         seeds = [b"game", game_id.to_le_bytes().as_ref()],
         bump = game.bump,
-        constraint = game.phase == GamePhase::Waiting @ PokerError::InvalidAction,
+        constraint = game.phase == GamePhase::Shuffling @ PokerError::InvalidAction,
         constraint = operator.key() == game.operator @ PokerError::PermissionDenied,
     )]
     pub game: Account<'info, Game>,

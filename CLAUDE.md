@@ -115,3 +115,7 @@ Use these @docs references to access complete specifications:
 - [ ] WebSocket connections authenticated with tokens
 - [ ] Input validation on all user-provided data
 - [ ] Error messages don't leak sensitive information
+
+## Memory
+
+Please record task on memory

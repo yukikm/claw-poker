@@ -2723,6 +2723,136 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "test_shuffle_and_deal",
+      "docs": [
+        "VRFオラクルを経由せずデッキをシャッフルする（フォールバック用）。",
+        "VRFコールバック（callback_deal）が一定時間内に到着しない場合、",
+        "サーバーがオペレーターとしてこの命令を呼び出す。",
+        "オペレーターの権限チェックにより、第三者からの不正呼出しは防止される。"
+      ],
+      "discriminator": [
+        4,
+        131,
+        130,
+        107,
+        57,
+        224,
+        141,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "random_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
     }
   ],
   "accounts": [

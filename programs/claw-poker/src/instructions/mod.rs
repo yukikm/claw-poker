@@ -23,7 +23,6 @@ pub mod settle_hand;
 pub mod start_new_hand;
 pub mod commit_game;
 pub mod handle_timeout;
-#[cfg(feature = "anchor-debug")]
 pub mod test_shuffle_and_deal;
 
 // Anchorマクロが生成する __client_accounts_* モジュールを含めて全エクスポート
@@ -78,6 +77,5 @@ pub use start_new_hand::*;
 pub use commit_game::*;
 #[allow(ambiguous_glob_reexports)]
 pub use handle_timeout::*;
-#[cfg(feature = "anchor-debug")]
 #[allow(ambiguous_glob_reexports)]
 pub use test_shuffle_and_deal::*;

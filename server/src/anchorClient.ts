@@ -10,6 +10,7 @@ import { AnchorProvider, Program, BN, Idl, Wallet } from '@coral-xyz/anchor';
 import * as path from 'path';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
+import { randomBytes } from 'crypto';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const IDL = require(path.join(__dirname, '../../app/lib/claw_poker_idl.json')) as Idl;
@@ -1008,6 +1009,53 @@ export class AnchorClient {
     }
 
     console.log(`[AnchorClient] Requested shuffle for game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
+   * VRFコールバック（callback_deal）がタイムアウトした場合のフォールバック。
+   * サーバー側で暗号学的乱数を生成し、test_shuffle_and_deal命令を直接呼び出す。
+   * フェーズがShuffling（requestShuffle後、callback_deal未到着）の場合にのみ使用。
+   * Waitingフェーズからの呼び出しはオンチェーン制約により拒否される（VRFバイパス防止）。
+   */
+  async fallbackShuffleAndDeal(
+    gameId: bigint,
+    player1Wallet: PublicKey,
+    player2Wallet: PublicKey,
+  ): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [player1StatePda] = this.derivePlayerStatePda(gameId, player1Wallet);
+    const [player2StatePda] = this.derivePlayerStatePda(gameId, player2Wallet);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+    const activeProgram = await this.getActiveErProgram();
+
+    // 暗号学的安全な32バイト乱数を生成
+    const randomSeed = [...randomBytes(32)];
+
+    let txSig: string;
+    try {
+      txSig = await (activeProgram.methods as unknown as {
+        testShuffleAndDeal: (gameId: BN, randomSeed: number[]) => {
+          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+        };
+      })
+        .testShuffleAndDeal(new BN(gameId.toString()), randomSeed)
+        .accounts({
+          game: gamePda,
+          operator: operatorPubkey,
+          player1State: player1StatePda,
+          player2State: player2StatePda,
+        })
+        .rpc();
+    } catch (rpcErr) {
+      if (isErConfirmationStructError(rpcErr)) {
+        console.warn(`[AnchorClient] fallbackShuffleAndDeal for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
+        return '';
+      }
+      throw rpcErr;
+    }
+
+    console.log(`[AnchorClient] Fallback shuffle completed for game ${gameId}: ${txSig}`);
     return txSig;
   }
 
