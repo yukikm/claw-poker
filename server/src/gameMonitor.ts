@@ -39,18 +39,52 @@ export interface DecodedGameState {
   player2IsAllIn: boolean;
 }
 
+/**
+ * TEE接続リフレッシュ用コールバック型。
+ * index.tsからanchorClient.createTeeConnectionForMonitor()を呼び出すファクトリを注入する。
+ */
+export type TeeConnectionRefresher = () => Promise<Connection | null>;
+
+/** ポーリング間隔（TEE WebSocketが切断された場合のフォールバック） */
+const POLL_INTERVAL_MS = 3_000;
+/** TEE WebSocket健全性チェック間隔 */
+const TEE_HEALTH_CHECK_INTERVAL_MS = 30_000;
+
 export class GameMonitor {
   private subscriptions = new Map<string, {
     l1Sub: number;
     erSub: number;
     teeSub?: number;
     teeConn?: Connection;
+    pollTimer?: ReturnType<typeof setInterval>;
+    gamePda: PublicKey;
+    onUpdate: (gameState: DecodedGameState) => void;
+    lastUpdateAt: number;
   }>();
+
+  /** TEE接続リフレッシュ用コールバック（index.tsから注入） */
+  private teeConnectionRefresher: TeeConnectionRefresher | null = null;
+  /** TEE健全性チェックタイマー */
+  private teeHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** TEE接続リフレッシャーを設定する */
+  setTeeConnectionRefresher(refresher: TeeConnectionRefresher): void {
+    this.teeConnectionRefresher = refresher;
+    // 健全性チェックを開始
+    if (!this.teeHealthCheckTimer) {
+      this.teeHealthCheckTimer = setInterval(() => {
+        void this.checkTeeHealth();
+      }, TEE_HEALTH_CHECK_INTERVAL_MS);
+    }
+  }
 
   /**
    * ゲームアカウントの変更を購読する。
    * teeConnection が指定された場合、プライベートER（TEE）からリアルタイム変更を受信する。
    * TEE未指定時は公開ER（erConnection）を使うが、プライベートERゲームでは変更通知が届かない。
+   *
+   * TEE WebSocketが切断された場合はポーリングにフォールバックし、
+   * TEE接続が復旧したらWebSocket購読を再開する。
    */
   watchGame(
     gameId: string,
@@ -68,6 +102,8 @@ export class GameMonitor {
       try {
         const state = this.decodeGameAccount(accountInfo.data);
         if (state) {
+          const sub = this.subscriptions.get(gameId);
+          if (sub) sub.lastUpdateAt = Date.now();
           onUpdate(state);
         }
       } catch (err) {
@@ -87,7 +123,20 @@ export class GameMonitor {
       console.log(`[GameMonitor] Watching game ${gameId} (L1 + public ER only, no TEE)`);
     }
 
-    this.subscriptions.set(gameId, { l1Sub, erSub, teeSub, teeConn: teeConnection });
+    // TEE WebSocketが死んだ場合のフォールバック: ポーリングで状態を取得する。
+    // Private ERゲームではTEE WebSocketが唯一のリアルタイム通知源のため、
+    // 切断時にゲームが永久にWaiting状態になることを防ぐ。
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    if (teeConnection) {
+      pollTimer = setInterval(() => {
+        void this.pollGameState(gameId, gamePda, teeConnection, handleAccountChange);
+      }, POLL_INTERVAL_MS);
+    }
+
+    this.subscriptions.set(gameId, {
+      l1Sub, erSub, teeSub, teeConn: teeConnection,
+      pollTimer, gamePda, onUpdate, lastUpdateAt: Date.now(),
+    });
 
     // onAccountChange はアカウントの「変化」のみ通知し、初期状態は通知しない。
     // プライベートERではTEE接続から初期取得する。公開ERにはアカウントが存在しない。
@@ -103,6 +152,9 @@ export class GameMonitor {
     erConnection.removeAccountChangeListener(subs.erSub);
     if (subs.teeSub !== undefined && subs.teeConn) {
       subs.teeConn.removeAccountChangeListener(subs.teeSub);
+    }
+    if (subs.pollTimer) {
+      clearInterval(subs.pollTimer);
     }
     this.subscriptions.delete(gameId);
     console.log(`[GameMonitor] Unwatched game ${gameId}`);
@@ -320,8 +372,110 @@ export class GameMonitor {
     }
   }
 
+  /**
+   * TEE接続経由でゲーム状態をポーリングする。
+   * WebSocket購読が切断された場合のフォールバックとして定期的に呼ばれる。
+   * 最後の更新から一定時間経過している場合のみ実行し、不要なRPC呼び出しを抑制する。
+   */
+  private async pollGameState(
+    gameId: string,
+    gamePda: PublicKey,
+    teeConnection: Connection,
+    handleAccountChange: (info: AccountInfo<Buffer>) => void,
+  ): Promise<void> {
+    const sub = this.subscriptions.get(gameId);
+    if (!sub) return;
+
+    // WebSocketからの更新が最近あった場合はポーリング不要
+    const timeSinceLastUpdate = Date.now() - sub.lastUpdateAt;
+    if (timeSinceLastUpdate < POLL_INTERVAL_MS * 0.8) return;
+
+    try {
+      const connToUse = sub.teeConn ?? teeConnection;
+      const info = await connToUse.getAccountInfo(gamePda, 'confirmed');
+      if (info) {
+        handleAccountChange(info as AccountInfo<Buffer>);
+      }
+    } catch {
+      // ポーリングエラーは静かに無視（WebSocket復旧待ち）
+    }
+  }
+
+  /**
+   * TEE WebSocket接続の健全性をチェックする。
+   * 長時間更新がないゲームがあれば、TEE接続をリフレッシュしてWebSocket購読を再開する。
+   */
+  private async checkTeeHealth(): Promise<void> {
+    if (!this.teeConnectionRefresher) return;
+
+    const staleThreshold = TEE_HEALTH_CHECK_INTERVAL_MS * 2;
+    const now = Date.now();
+    let needsRefresh = false;
+
+    for (const [gameId, sub] of this.subscriptions) {
+      if (sub.teeConn && (now - sub.lastUpdateAt) > staleThreshold) {
+        console.warn(`[GameMonitor] Game ${gameId}: no TEE update for ${Math.round((now - sub.lastUpdateAt) / 1000)}s, refreshing TEE connection`);
+        needsRefresh = true;
+        break;
+      }
+    }
+
+    if (!needsRefresh) return;
+
+    try {
+      const newTeeConn = await this.teeConnectionRefresher();
+      if (!newTeeConn) return;
+
+      // 古いTEE購読を解除して新しい接続で再購読
+      for (const [gameId, sub] of this.subscriptions) {
+        if (!sub.teeConn) continue;
+
+        // 古いTEE購読を解除
+        if (sub.teeSub !== undefined) {
+          try {
+            sub.teeConn.removeAccountChangeListener(sub.teeSub);
+          } catch {
+            // 既に切断済みの場合は無視
+          }
+        }
+
+        // 新しいTEE接続で再購読
+        const handleAccountChange = (accountInfo: AccountInfo<Buffer>): void => {
+          try {
+            const state = this.decodeGameAccount(accountInfo.data);
+            if (state) {
+              sub.lastUpdateAt = Date.now();
+              sub.onUpdate(state);
+            }
+          } catch (err) {
+            console.error(`[GameMonitor] Failed to decode game account for ${gameId}:`, err);
+          }
+        };
+
+        sub.teeConn = newTeeConn;
+        sub.teeSub = newTeeConn.onAccountChange(sub.gamePda, handleAccountChange, 'confirmed');
+        console.log(`[GameMonitor] Game ${gameId}: TEE WebSocket subscription refreshed`);
+      }
+    } catch (err) {
+      console.error('[GameMonitor] TEE connection refresh failed:', err);
+    }
+  }
+
   getWatchedGameCount(): number {
     return this.subscriptions.size;
+  }
+
+  /** シャットダウン時にタイマーをクリーンアップする */
+  shutdown(): void {
+    if (this.teeHealthCheckTimer) {
+      clearInterval(this.teeHealthCheckTimer);
+      this.teeHealthCheckTimer = null;
+    }
+    for (const [, sub] of this.subscriptions) {
+      if (sub.pollTimer) {
+        clearInterval(sub.pollTimer);
+      }
+    }
   }
 }
 

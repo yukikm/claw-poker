@@ -449,6 +449,22 @@ export class AnchorClient {
     return this.erConnection;
   }
 
+  /**
+   * 読み取り用の最適な接続を返す。
+   * Private ER委譲後はアカウントがTEE上にのみ存在するため、TEE接続を優先する。
+   * TEE接続が取得できない場合のみ公開ERにフォールバックする（ログ付き）。
+   */
+  async getReadConnection(): Promise<Connection> {
+    if (!this.teeRpcUrl) return this.erConnection;
+    try {
+      const teeConn = await this.getTeeConnection();
+      if (teeConn) return teeConn;
+    } catch (err) {
+      console.warn('[AnchorClient] TEE connection failed for read, falling back to public ER (data may be unavailable):', err);
+    }
+    return this.erConnection;
+  }
+
   getOperatorPublicKey(): PublicKey {
     return this.operatorKeypair.publicKey;
   }
@@ -1119,8 +1135,7 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
 
     // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
-    const teeConnForRead = await this.getTeeConnection().catch(() => null);
-    const readConn = teeConnForRead ?? this.erConnection;
+    const readConn = await this.getReadConnection();
     const gameAccount = await readConn.getAccountInfo(gamePda, 'confirmed');
     if (!gameAccount || gameAccount.data.length < 8) {
       throw new Error(`Game account not found or not initialized for gameId ${gameId}`);
@@ -1180,39 +1195,61 @@ export class AnchorClient {
   /**
    * ER上のGameアカウントから現在のpotとプレイヤーチップスタックを取得する。
    * submitPlayerAction後の正確な状態をaction_accepted/opponent_actionメッセージに使用する。
+   *
+   * Private ER委譲後はアカウントがTEE上にのみ存在するため、TEE接続を必須とする。
+   * TEE接続失敗時は公開ERにフォールバックせず、リトライ後にnullを返す。
    */
   async fetchGamePotAndStacks(gameId: bigint): Promise<{ pot: number; player1ChipStack: number; player2ChipStack: number } | null> {
-    try {
-      const [gamePda] = this.deriveGamePda(gameId);
-      // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
-      const teeConnForRead = await this.getTeeConnection().catch(() => null);
-      const readConn = teeConnForRead ?? this.erConnection;
-      const accountInfo = await readConn.getAccountInfo(gamePda, 'confirmed');
-      if (!accountInfo || accountInfo.data.length < 8) return null;
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 500;
+    const [gamePda] = this.deriveGamePda(gameId);
 
-      let decoded: {
-        pot: { toNumber: () => number };
-        player1ChipStack?: { toNumber: () => number };
-        player2ChipStack?: { toNumber: () => number };
-      };
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as typeof decoded;
-      } catch {
-        // アカウントが未初期化またはフェーズ遷移中でdiscriminatorが不一致の場合。
-        // 正常なレース条件のため warn レベルに抑制する。
-        console.warn(`[AnchorClient] Game account not decodable for ${gameId} (account may not be initialized yet)`);
+        // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
+        const readConn = await this.getReadConnection();
+        const accountInfo = await readConn.getAccountInfo(gamePda, 'confirmed');
+        if (!accountInfo || accountInfo.data.length < 8) {
+          if (attempt < MAX_RETRIES) {
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] Game account not found for ${gameId} after ${MAX_RETRIES} retries`);
+          return null;
+        }
+
+        let decoded: {
+          pot: { toNumber: () => number };
+          player1ChipStack?: { toNumber: () => number };
+          player2ChipStack?: { toNumber: () => number };
+        };
+        try {
+          decoded = this.erProgram.coder.accounts.decode('Game', accountInfo.data) as typeof decoded;
+        } catch {
+          if (attempt < MAX_RETRIES) {
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] Game account not decodable for ${gameId} after ${MAX_RETRIES} retries (account may not be initialized yet)`);
+          return null;
+        }
+
+        return {
+          pot: decoded.pot.toNumber(),
+          player1ChipStack: decoded.player1ChipStack?.toNumber() ?? 0,
+          player2ChipStack: decoded.player2ChipStack?.toNumber() ?? 0,
+        };
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          console.warn(`[AnchorClient] fetchGamePotAndStacks attempt ${attempt}/${MAX_RETRIES} failed for ${gameId}:`, err);
+          await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+          continue;
+        }
+        console.warn(`[AnchorClient] Failed to fetch game state for ${gameId} after ${MAX_RETRIES} retries:`, err);
         return null;
       }
-
-      return {
-        pot: decoded.pot.toNumber(),
-        player1ChipStack: decoded.player1ChipStack?.toNumber() ?? 0,
-        player2ChipStack: decoded.player2ChipStack?.toNumber() ?? 0,
-      };
-    } catch (err) {
-      console.warn(`[AnchorClient] Failed to fetch game state for ${gameId}:`, err);
-      return null;
     }
+    return null;
   }
 
   // ─── TEE認証 ────────────────────────────────────────────────────────────
@@ -1368,64 +1405,87 @@ export class AnchorClient {
    * 2. オペレーターTEE接続（フォールバック、プレイヤートークン未取得時）
    *    警告ログを出力。オペレーターがACLに含まれている場合のみ動作。
    * 3. 公開ER接続（TEE未設定の開発環境のみ）
+   *
+   * Private ER委譲後はPlayerStateがTEE上にのみ存在するため、リトライロジック付き。
    */
   async getPlayerHoleCards(
     gameId: bigint,
     playerWallet: PublicKey,
   ): Promise<[string, string] | null> {
-    try {
-      const [playerStatePda] = this.derivePlayerStatePda(gameId, playerWallet);
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 500;
+    const [playerStatePda] = this.derivePlayerStatePda(gameId, playerWallet);
 
-      let connection: Connection;
-      const playerKey = playerWallet.toString();
-      const playerCached = this.playerTeeConnections.get(playerKey);
-
-      if (
-        playerCached &&
-        playerCached.expiresAt > Date.now() + AnchorClient.TEE_TOKEN_REFRESH_BUFFER_MS
-      ) {
-        // 優先: プレイヤー自身のTEEトークン（公式PERモデル準拠）
-        connection = playerCached.connection;
-      } else {
-        // フォールバック: オペレーターTEE接続
-        try {
-          const teeConn = await this.getTeeConnection();
-          if (teeConn) {
-            console.warn(
-              `[AnchorClient] Player TEE token not set for ${playerWallet.toBase58()}, ` +
-              'using operator TEE (privacy degraded - player should respond to tee_auth_challenge)',
-            );
-          }
-          connection = teeConn ?? this.erConnection;
-        } catch (teeErr) {
-          console.warn('[AnchorClient] TEE auth failed, falling back to ER connection:', teeErr);
-          connection = this.erConnection;
-        }
-      }
-
-      const accountInfo = await connection.getAccountInfo(playerStatePda, 'confirmed');
-      if (!accountInfo || accountInfo.data.length < 8) return null;
-
-      let decoded: { holeCards: number[] };
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        decoded = this.erProgram.coder.accounts.decode('PlayerState', accountInfo.data) as {
-          holeCards: number[];
-        };
-      } catch {
-        // アカウントが未初期化またはフェーズ遷移中でdiscriminatorが不一致の場合。
-        // 正常なレース条件のため warn レベルに抑制する。
-        console.warn(`[AnchorClient] PlayerState not decodable for ${playerWallet.toBase58()} (account may not be initialized yet)`);
+        let connection: Connection;
+        const playerKey = playerWallet.toString();
+        const playerCached = this.playerTeeConnections.get(playerKey);
+
+        if (
+          playerCached &&
+          playerCached.expiresAt > Date.now() + AnchorClient.TEE_TOKEN_REFRESH_BUFFER_MS
+        ) {
+          // 優先: プレイヤー自身のTEEトークン（公式PERモデル準拠）
+          connection = playerCached.connection;
+        } else {
+          // フォールバック: オペレーターTEE接続
+          try {
+            const teeConn = await this.getTeeConnection();
+            if (teeConn) {
+              if (attempt === 1) {
+                console.warn(
+                  `[AnchorClient] Player TEE token not set for ${playerWallet.toBase58()}, ` +
+                  'using operator TEE (privacy degraded - player should respond to tee_auth_challenge)',
+                );
+              }
+            }
+            connection = teeConn ?? this.erConnection;
+          } catch (teeErr) {
+            console.warn('[AnchorClient] TEE auth failed, falling back to ER connection:', teeErr);
+            connection = this.erConnection;
+          }
+        }
+
+        const accountInfo = await connection.getAccountInfo(playerStatePda, 'confirmed');
+        if (!accountInfo || accountInfo.data.length < 8) {
+          if (attempt < MAX_RETRIES) {
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] PlayerState not found for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries`);
+          return null;
+        }
+
+        let decoded: { holeCards: number[] };
+        try {
+          decoded = this.erProgram.coder.accounts.decode('PlayerState', accountInfo.data) as {
+            holeCards: number[];
+          };
+        } catch {
+          if (attempt < MAX_RETRIES) {
+            await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+            continue;
+          }
+          console.warn(`[AnchorClient] PlayerState not decodable for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries (account may not be initialized yet)`);
+          return null;
+        }
+
+        const cards = decoded.holeCards;
+        if (!cards || cards[0] === 255 || cards[1] === 255) return null;
+
+        return [decodeCardToString(cards[0]), decodeCardToString(cards[1])];
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          console.warn(`[AnchorClient] getPlayerHoleCards attempt ${attempt}/${MAX_RETRIES} failed for ${playerWallet.toBase58()}:`, err);
+          await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+          continue;
+        }
+        console.error(`[AnchorClient] Failed to read hole cards for ${playerWallet.toBase58()} after ${MAX_RETRIES} retries:`, err);
         return null;
       }
-
-      const cards = decoded.holeCards;
-      if (!cards || cards[0] === 255 || cards[1] === 255) return null;
-
-      return [decodeCardToString(cards[0]), decodeCardToString(cards[1])];
-    } catch (err) {
-      console.error(`[AnchorClient] Failed to read hole cards for ${playerWallet.toBase58()}:`, err);
-      return null;
     }
+    return null;
   }
 
   // ─── ゲーム解決（resolve_game） ─────────────────────────────────────────────

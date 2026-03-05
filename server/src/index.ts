@@ -96,6 +96,12 @@ const agentHandler = new AgentHandler();
 const gameMonitor = new GameMonitor();
 const anchorClient = new AnchorClient(SOLANA_RPC_URL, MAGICBLOCK_ER_URL);
 
+// GameMonitorにTEE接続リフレッシャーを注入する。
+// TEE WebSocket購読が切断された場合に新しいTEE接続を取得してGameMonitorが自動復旧できるようにする。
+gameMonitor.setTeeConnectionRefresher(async () => {
+  return anchorClient.createTeeConnectionForMonitor();
+});
+
 // ─── TEE認証レスポンスハンドラ ────────────────────────────────────────────────
 // プレイヤーが tee_auth_challenge に署名して返答したとき、プレイヤー専用TEEトークンを発行する。
 // 以降の getPlayerHoleCards はこのプレイヤー固有トークンを使用し、
@@ -996,6 +1002,7 @@ console.log(`  Operator: ${anchorClient.getOperatorPublicKey().toBase58()}`);
 function shutdown(): void {
   console.log('\nShutting down...');
   agentHandler.shutdown();
+  gameMonitor.shutdown();
   wss.close();
   httpServer.close();
   process.exit(0);
