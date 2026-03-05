@@ -48,23 +48,6 @@ export interface ActiveGame {
   handNumber: number;
 }
 
-/**
- * MagicBlock PER がversioned transactionを返す場合、Anchor内部の getTransaction で
- * accountKeys のパースに失敗して StructError が発生する。
- * トランザクション自体は送信・処理済みのため、このエラーは成功として扱える。
- *
- * 条件を厳密にすることで、他の accountKeys 関連エラー（例: アカウント不足）を
- * 誤って成功扱いしないようにする。
- */
-function isErConfirmationStructError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message;
-  // StructError は superstruct ライブラリから送出され、メッセージに "Expected" と "accountKeys" を含む
-  return (
-    msg.includes('accountKeys') &&
-    (err.name === 'StructError' || msg.includes('Expected a value of type') || msg.includes('Expected an instance of'))
-  );
-}
 
 /** 有効なアクションの集合（ランタイム検証用） */
 const VALID_ACTIONS: ReadonlySet<string> = new Set<ActionType>([
@@ -898,14 +881,13 @@ export class AnchorClient {
     const anchorAmount = amount !== undefined ? new BN(amount) : null;
     const activeProgram = await this.getActiveErProgram();
 
-    const methodBuilder = (activeProgram.methods as unknown as {
+    const tx = await (activeProgram.methods as unknown as {
       playerAction: (
         gameId: BN,
         action: Record<string, Record<string, never>>,
         amount: BN | null,
       ) => {
         accounts: (a: Record<string, PublicKey>) => {
-          rpc: () => Promise<string>;
           transaction: () => Promise<Transaction>;
         };
       };
@@ -916,21 +898,11 @@ export class AnchorClient {
         playerState: playerStatePda,
         player: playerWallet,
         operator: operatorPubkey,
-      });
+      })
+      .transaction();
 
-    let txSig: string;
-    try {
-      txSig = await methodBuilder.rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(
-          `[AnchorClient] Action ${action} for ${playerWallet.toBase58()} in game ${gameId}: ` +
-          'tx sent but confirmation parsing failed (versioned tx StructError). Treating as success.',
-        );
-        return '';
-      }
-      throw rpcErr;
-    }
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Action ${action} for ${playerWallet.toBase58()} in game ${gameId}: ${txSig}`);
     return txSig;
@@ -944,26 +916,20 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        startNewHand: (gameId: BN) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+    const tx = await (activeProgram.methods as unknown as {
+      startNewHand: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .startNewHand(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
       })
-        .startNewHand(new BN(gameId.toString()))
-        .accounts({
-          game: gamePda,
-          operator: operatorPubkey,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] startNewHand for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Started new hand for game ${gameId}: ${txSig}`);
     return txSig;
@@ -984,29 +950,23 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        requestShuffle: (gameId: BN, clientSeed: number) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+    const tx = await (activeProgram.methods as unknown as {
+      requestShuffle: (gameId: BN, clientSeed: number) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .requestShuffle(new BN(gameId.toString()), clientSeed)
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
+        oracleQueue: DEFAULT_ORACLE_QUEUE,
       })
-        .requestShuffle(new BN(gameId.toString()), clientSeed)
-        .accounts({
-          game: gamePda,
-          operator: operatorPubkey,
-          player1State: player1StatePda,
-          player2State: player2StatePda,
-          oracleQueue: DEFAULT_ORACLE_QUEUE,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] requestShuffle for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Requested shuffle for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1032,28 +992,22 @@ export class AnchorClient {
     // 暗号学的安全な32バイト乱数を生成
     const randomSeed = [...randomBytes(32)];
 
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        testShuffleAndDeal: (gameId: BN, randomSeed: number[]) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+    const tx = await (activeProgram.methods as unknown as {
+      testShuffleAndDeal: (gameId: BN, randomSeed: number[]) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .testShuffleAndDeal(new BN(gameId.toString()), randomSeed)
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
       })
-        .testShuffleAndDeal(new BN(gameId.toString()), randomSeed)
-        .accounts({
-          game: gamePda,
-          operator: operatorPubkey,
-          player1State: player1StatePda,
-          player2State: player2StatePda,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] fallbackShuffleAndDeal for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Fallback shuffle completed for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1122,27 +1076,22 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
 
     const activeProgram = await this.getActiveErProgram();
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        handleTimeout: (gameId: BN) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+
+    const tx = await (activeProgram.methods as unknown as {
+      handleTimeout: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .handleTimeout(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        timedOutPlayerState: playerStatePda,
+        operator: operatorPubkey,
       })
-        .handleTimeout(new BN(gameId.toString()))
-        .accounts({
-          game: gamePda,
-          timedOutPlayerState: playerStatePda,
-          operator: operatorPubkey,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] handleTimeout for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Timeout handled for game ${gameId}, player ${timedOutPlayerWallet.toBase58()}: ${txSig}`);
     return txSig;
@@ -1161,28 +1110,22 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        settleHand: (gameId: BN) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+    const tx = await (activeProgram.methods as unknown as {
+      settleHand: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .settleHand(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
       })
-        .settleHand(new BN(gameId.toString()))
-        .accounts({
-          game: gamePda,
-          operator: operatorPubkey,
-          player1State: player1StatePda,
-          player2State: player2StatePda,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] settleHand for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Hand settled for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1208,32 +1151,26 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        revealCommunityCards: (gameId: BN, phase: Record<string, unknown>, boardCards: Buffer) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+    const tx = await (activeProgram.methods as unknown as {
+      revealCommunityCards: (gameId: BN, phase: Record<string, unknown>, boardCards: Buffer) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .revealCommunityCards(
+        new BN(gameId.toString()),
+        this.encodeGamePhase(targetPhase),
+        Buffer.from(boardCards),
+      )
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
       })
-        .revealCommunityCards(
-          new BN(gameId.toString()),
-          this.encodeGamePhase(targetPhase),
-          Buffer.from(boardCards),
-        )
-        .accounts({
-          game: gamePda,
-          operator: operatorPubkey,
-          player1State: player1StatePda,
-          player2State: player2StatePda,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] revealCommunityCards for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Community cards revealed for game ${gameId}, phase ${targetPhase}: ${txSig}`);
     return txSig;
@@ -1253,28 +1190,22 @@ export class AnchorClient {
     const operatorPubkey = this.operatorKeypair.publicKey;
     const activeProgram = await this.getActiveErProgram();
 
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        revealShowdownCards: (gameId: BN) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+    const tx = await (activeProgram.methods as unknown as {
+      revealShowdownCards: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .revealShowdownCards(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        operator: operatorPubkey,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
       })
-        .revealShowdownCards(new BN(gameId.toString()))
-        .accounts({
-          game: gamePda,
-          operator: operatorPubkey,
-          player1State: player1StatePda,
-          player2State: player2StatePda,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] revealShowdownCards for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Showdown cards revealed for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1350,33 +1281,28 @@ export class AnchorClient {
     const permissionGame = this.derivePermissionPda(gamePda);
 
     const activeProgram = await this.getActiveErProgram();
-    let txSig: string;
-    try {
-      txSig = await (activeProgram.methods as unknown as {
-        commitGame: (gameId: BN) => {
-          accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-        };
+
+    const tx = await (activeProgram.methods as unknown as {
+      commitGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { transaction: () => Promise<Transaction> };
+      };
+    })
+      .commitGame(new BN(gameId.toString()))
+      .accounts({
+        payer: operatorPubkey,
+        operator: operatorPubkey,
+        game: gamePda,
+        player1State: player1StatePda,
+        player2State: player2StatePda,
+        permissionP1: permissionP1,
+        permissionP2: permissionP2,
+        permissionGame: permissionGame,
+        permissionProgram: PERMISSION_PROG,
       })
-        .commitGame(new BN(gameId.toString()))
-        .accounts({
-          payer: operatorPubkey,
-          operator: operatorPubkey,
-          game: gamePda,
-          player1State: player1StatePda,
-          player2State: player2StatePda,
-          permissionP1: permissionP1,
-          permissionP2: permissionP2,
-          permissionGame: permissionGame,
-          permissionProgram: PERMISSION_PROG,
-        })
-        .rpc();
-    } catch (rpcErr) {
-      if (isErConfirmationStructError(rpcErr)) {
-        console.warn(`[AnchorClient] commitGame for game ${gameId}: tx sent but confirmation parsing failed (versioned tx StructError)`);
-        return '';
-      }
-      throw rpcErr;
-    }
+      .transaction();
+
+    const erConnection = (activeProgram.provider as AnchorProvider).connection;
+    const txSig = await this.sendErTransaction(tx, erConnection);
 
     console.log(`[AnchorClient] Checkpoint commit for game ${gameId}: ${txSig}`);
     return txSig;
@@ -1484,6 +1410,32 @@ export class AnchorClient {
     this.teeAuthCache = { token, expiresAt, connection: teeConnection };
     console.log('[AnchorClient] TEE auth token acquired, expires:', new Date(expiresAt).toISOString());
     return teeConnection;
+  }
+
+  /**
+   * ER向けトランザクションを送信・確認する。
+   * Anchorの.rpc()はMagicBlock ER上でVersionedTransactionに起因するStructErrorを起こすため、
+   * .transaction()でTxを構築し、Connection.sendRawTransactionで送信後、
+   * Connection.confirmTransactionで確認する。
+   */
+  private async sendErTransaction(
+    tx: Transaction,
+    connection: Connection,
+  ): Promise<string> {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = this.operatorKeypair.publicKey;
+    tx.partialSign(this.operatorKeypair);
+
+    const rawTx = tx.serialize();
+    const sig = await connection.sendRawTransaction(rawTx, {
+      skipPreflight: true,
+    });
+    await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
+    return sig;
   }
 
   /**

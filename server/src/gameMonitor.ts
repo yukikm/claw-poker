@@ -51,6 +51,10 @@ export type TeeConnectionRefresher = () => Promise<Connection | null>;
 const POLL_INTERVAL_MS = 3_000;
 /** TEE WebSocket健全性チェック間隔 */
 const TEE_HEALTH_CHECK_INTERVAL_MS = 30_000;
+/** StructError後のバーストポーリング間隔 */
+const BURST_POLL_INTERVAL_MS = 500;
+/** StructError後のバーストポーリング回数 */
+const BURST_POLL_COUNT = 10;
 
 export class GameMonitor {
   private subscriptions = new Map<string, {
@@ -63,6 +67,9 @@ export class GameMonitor {
     onUpdate: (gameState: DecodedGameState) => void;
     lastUpdateAt: number;
   }>();
+
+  /** StructError後のバーストポーリングタイマー（gameId → timer） */
+  private burstPollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** TEE接続リフレッシュ用コールバック（index.tsから注入） */
   private teeConnectionRefresher: TeeConnectionRefresher | null = null;
@@ -157,6 +164,12 @@ export class GameMonitor {
     }
     if (subs.pollTimer) {
       clearInterval(subs.pollTimer);
+    }
+    // バーストポーリングタイマーもクリーンアップ
+    const burstTimer = this.burstPollTimers.get(gameId);
+    if (burstTimer) {
+      clearInterval(burstTimer);
+      this.burstPollTimers.delete(gameId);
     }
     this.subscriptions.delete(gameId);
     console.log(`[GameMonitor] Unwatched game ${gameId}`);
@@ -472,6 +485,83 @@ export class GameMonitor {
     }
   }
 
+  /**
+   * StructError発生後に呼ばれる。指定ゲームのポーリングを短間隔（500ms）で最大10回実行し、
+   * トランザクション実行後のオンチェーン状態変化を確実にキャプチャする。
+   * 既にバーストポーリング中の場合はリセットして再開する。
+   */
+  triggerBurstPoll(gameId: string): void {
+    const sub = this.subscriptions.get(gameId);
+    if (!sub) {
+      console.warn(`[GameMonitor] triggerBurstPoll: game ${gameId} not watched, skipping`);
+      return;
+    }
+
+    // 既存のバーストタイマーをクリア
+    const existingTimer = this.burstPollTimers.get(gameId);
+    if (existingTimer) {
+      clearInterval(existingTimer);
+      this.burstPollTimers.delete(gameId);
+    }
+
+    console.log(`[GameMonitor] Game ${gameId}: starting burst poll (${BURST_POLL_COUNT}x every ${BURST_POLL_INTERVAL_MS}ms) after StructError`);
+
+    let remaining = BURST_POLL_COUNT;
+    const burstTimer = setInterval(() => {
+      const currentSub = this.subscriptions.get(gameId);
+      if (!currentSub) {
+        const timer = this.burstPollTimers.get(gameId);
+        if (timer) {
+          clearInterval(timer);
+          this.burstPollTimers.delete(gameId);
+        }
+        return;
+      }
+
+      const connToUse = currentSub.teeConn;
+      if (connToUse) {
+        void this.forcePollGameState(gameId, currentSub.gamePda, connToUse, currentSub.onUpdate);
+      }
+
+      remaining--;
+      if (remaining <= 0) {
+        const timer = this.burstPollTimers.get(gameId);
+        if (timer) {
+          clearInterval(timer);
+          this.burstPollTimers.delete(gameId);
+        }
+        console.log(`[GameMonitor] Game ${gameId}: burst poll completed`);
+      }
+    }, BURST_POLL_INTERVAL_MS);
+
+    this.burstPollTimers.set(gameId, burstTimer);
+  }
+
+  /**
+   * 指定ゲームの状態を即座にポーリングする（lastUpdateAtチェックを無視）。
+   * StructErrorリカバリーや外部からの強制ポーリングに使用する。
+   */
+  async forcePollGameState(
+    gameId: string,
+    gamePda: PublicKey,
+    teeConnection: Connection,
+    onUpdate: (gameState: DecodedGameState) => void,
+  ): Promise<void> {
+    try {
+      const info = await teeConnection.getAccountInfo(gamePda, 'confirmed');
+      if (info) {
+        const state = this.decodeGameAccount(info.data);
+        if (state) {
+          const sub = this.subscriptions.get(gameId);
+          if (sub) sub.lastUpdateAt = Date.now();
+          onUpdate(state);
+        }
+      }
+    } catch (err) {
+      console.warn(`[GameMonitor] forcePollGameState failed for game ${gameId}:`, err);
+    }
+  }
+
   getWatchedGameCount(): number {
     return this.subscriptions.size;
   }
@@ -487,6 +577,11 @@ export class GameMonitor {
         clearInterval(sub.pollTimer);
       }
     }
+    // バーストポーリングタイマーもクリーンアップ
+    for (const [, timer] of this.burstPollTimers) {
+      clearInterval(timer);
+    }
+    this.burstPollTimers.clear();
   }
 }
 

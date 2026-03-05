@@ -10,7 +10,7 @@ import { GameMonitor, DecodedGameState } from './gameMonitor';
 import { AnchorClient, ActionType } from './anchorClient';
 import { SignatureStore } from './signatureStore';
 import { createX402Router } from './x402Handler';
-import { QueueJoinedMessage, GameJoinedMessage, ServerMessage, GameStateMessage, OpponentActionMessage, CommunityCardsRevealedMessage, HandCompleteMessage, HandHistoryEntry } from './types';
+import { QueueJoinedMessage, GameJoinedMessage, GameStateMessage, OpponentActionMessage, CommunityCardsRevealedMessage, HandCompleteMessage, HandHistoryEntry } from './types';
 
 config();
 
@@ -24,8 +24,6 @@ const PUBLIC_HTTP_URL = process.env.PUBLIC_HTTP_URL ?? `http://43.206.193.46:${H
 /** WebSocketの公開URL（SKILL.mdのURL置換に使用） */
 const PUBLIC_WS_URL = process.env.PUBLIC_WS_URL ?? `ws://43.206.193.46:${PORT}`;
 
-/** デフォルト参加費 (0.1 SOL in lamports) */
-const DEFAULT_ENTRY_FEE = 100_000_000;
 /** ゲーム開始時の各プレイヤーチップ枚数 */
 const STARTING_CHIPS = 1000;
 /** ブラインド額 */
@@ -637,15 +635,14 @@ async function onGameStateUpdate(
             void executeVrfFallback(gameId, gameIdStr, p1, p2);
           }, VRF_CALLBACK_TIMEOUT_MS);
           vrfFallbackTimers.set(gameIdStr, fallbackTimer);
+          waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
         } catch (vrfErr) {
           // VRFリクエスト自体が失敗した場合。
           // request_shuffleが失敗 = オンチェーンでShufflingに遷移していないため、
           // フォールバック(test_shuffle_and_deal)もShuffling制約で拒否される。
           // 次回のonGameStateUpdateループで再度request_shuffleを試行する。
           console.error(`[Crank] VRF request failed for game ${gameIdStr}, will retry on next state update:`, vrfErr);
-          waitingCrankExecutedAtHand.delete(gameIdStr);
         }
-        waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
       } catch (err) {
         console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
       } finally {
@@ -691,6 +688,7 @@ async function onGameStateUpdate(
         console.log(`[Crank] Game ${gameIdStr}: showdown, revealing cards and settling`);
         await anchorClient.revealShowdownCards(gameId, p1, p2);
         await anchorClient.settleHand(gameId, p1, p2);
+        gameMonitor.triggerBurstPoll(gameIdStr);
       } else if (state.bettingClosed) {
         // AllInランアウト: 残りのコミュニティカードを全公開 → settle_hand
         console.log(`[Crank] Game ${gameIdStr}: all-in runout in ${state.phase}`);
@@ -709,6 +707,7 @@ async function onGameStateUpdate(
         // River + betting_closed → ショーダウンへ
         await anchorClient.revealShowdownCards(gameId, p1, p2);
         await anchorClient.settleHand(gameId, p1, p2);
+        gameMonitor.triggerBurstPoll(gameIdStr);
       } else {
         // 通常のベッティングラウンド終了 → 次のコミュニティカードを公開
         const dc = state.dealCards;
@@ -725,6 +724,9 @@ async function onGameStateUpdate(
         // River終了は player_action.rs で phase=Showdown に設定されるため、
         // ここではなく isShowdown ブランチで処理される
       }
+      // StructErrorで成功扱いされた場合、GameMonitorに状態変化が通知されない可能性がある。
+      // バーストポーリングで確実にオンチェーン状態をキャプチャする。
+      gameMonitor.triggerBurstPoll(gameIdStr);
       bettingEndCrankExecuted.set(gameIdStr, crankKey);
     } catch (err) {
       console.error(`[Crank] Failed betting-end crank for game ${gameIdStr} (phase=${state.phase}):`, err);
@@ -933,6 +935,8 @@ async function onGameStateUpdate(
         const timedOutPlayer = new PublicKey(currentTurnWallet);
         console.log(`[Timeout] Game ${gameIdStr}: ${currentTurnWallet} timed out, calling handle_timeout`);
         await anchorClient.handleTimeout(gameId, timedOutPlayer);
+        // StructErrorで確認失敗の可能性があるため、バーストポーリングで状態変化をキャプチャ
+        gameMonitor.triggerBurstPoll(gameIdStr);
       } catch (err) {
         console.error(`[Timeout] Failed to handle timeout for game ${gameIdStr}:`, err);
       } finally {
