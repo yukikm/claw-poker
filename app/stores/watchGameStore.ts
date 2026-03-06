@@ -16,6 +16,7 @@ interface WatchGameStore {
   bettingPool: BettingPoolState | null;
   subscriptionEntries: SubscriptionEntry[];
   isLoading: boolean;
+  pollTimer: ReturnType<typeof setInterval> | null;
 
   subscribeToGame: (
     connection: Connection,       // L1: BettingPool監視用
@@ -108,6 +109,24 @@ function inferAction(
     return 'Check';
   }
   return null;
+}
+
+/** サーバーAPIが返すカード文字列 (e.g. "2S", "AH", "TD") を CardDisplay に変換 */
+function parseServerCard(cardStr: string): import('@/lib/types').CardDisplay {
+  if (!cardStr || cardStr === '??') return { suit: 'Spades', rank: 0, isUnknown: true };
+  const rankChars: Record<string, number> = {
+    '2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7,
+    'T': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12,
+  };
+  const suitChars: Record<string, 'Spades' | 'Hearts' | 'Diamonds' | 'Clubs'> = {
+    'S': 'Spades', 'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs',
+  };
+  const rankChar = cardStr.slice(0, -1);
+  const suitChar = cardStr.slice(-1);
+  const rank = rankChars[rankChar];
+  const suit = suitChars[suitChar];
+  if (rank === undefined || !suit) return { suit: 'Spades', rank: 0, isUnknown: true };
+  return { suit, rank, isUnknown: false };
 }
 
 function mapGameAccount(
@@ -206,14 +225,18 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
   bettingPool: null,
   subscriptionEntries: [],
   isLoading: false,
+  pollTimer: null,
 
   subscribeToGame: (connection, erConnection, gamePda, bettingPoolPda, programId, program) => {
-    // 既存のサブスクリプションを解除
-    const { subscriptionEntries } = get();
+    // 既存のサブスクリプションとポーリングを解除
+    const { subscriptionEntries, pollTimer: existingTimer } = get();
     subscriptionEntries.forEach(({ id, connection: conn }) => {
       conn.removeAccountChangeListener(id);
     });
-    set({ subscriptionEntries: [], isLoading: true });
+    if (existingTimer) {
+      clearInterval(existingTimer);
+    }
+    set({ subscriptionEntries: [], isLoading: true, pollTimer: null });
 
     /** BettingPool の winner 確定時に myBetsStore を同期するヘルパー */
     const syncBets = (pool: BettingPoolState) => {
@@ -295,15 +318,139 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
       }
 
       set({ isLoading: false });
+
+      // サーバーAPIポーリング開始: ゲームIDが判明したらTEE上の最新状態を定期取得
+      if (gameState) {
+        const gameIdStr = gameState.gameId.toString();
+        const SERVER_API_URL = process.env.NEXT_PUBLIC_SERVER_API_URL ?? 'http://localhost:3001';
+        const timer = setInterval(async () => {
+          try {
+            const resp = await fetch(`${SERVER_API_URL}/api/v1/games/${gameIdStr}`);
+            if (!resp.ok) return;
+            const data = await resp.json() as {
+              phase: string;
+              handNumber: number;
+              pot: number;
+              player1: string;
+              player2: string;
+              player1ChipStack: number;
+              player2ChipStack: number;
+              player1Committed: number;
+              player2Committed: number;
+              player1HasFolded: boolean;
+              player2HasFolded: boolean;
+              player1IsAllIn: boolean;
+              player2IsAllIn: boolean;
+              boardCards: string[];
+              currentTurn: string;
+              dealerPosition: number;
+              lastRaiseAmount: number;
+              showdownCardsP1: [string, string] | null;
+              showdownCardsP2: [string, string] | null;
+              winner: string | null;
+              bettingClosed: boolean;
+            };
+            const prevGame = get().game;
+            if (!prevGame) return;
+
+            const serverPhaseMap: Record<string, GamePhase> = {
+              Waiting: 'Waiting', Shuffling: 'Shuffling', PreFlop: 'PreFlop',
+              Flop: 'Flop', Turn: 'Turn', River: 'River', Showdown: 'Showdown', Finished: 'Finished',
+            };
+            const serverPhase = serverPhaseMap[data.phase] ?? 'Waiting';
+
+            // 状態が変わっている場合のみ更新
+            if (
+              prevGame.phase !== serverPhase ||
+              prevGame.handNumber !== data.handNumber ||
+              prevGame.pot !== data.pot ||
+              prevGame.player1.chipsCommitted !== data.player1Committed ||
+              prevGame.player2.chipsCommitted !== data.player2Committed ||
+              prevGame.player1.hasFolded !== data.player1HasFolded ||
+              prevGame.player2.hasFolded !== data.player2HasFolded
+            ) {
+              const DEFAULT_PUBKEY = '11111111111111111111111111111111';
+              const player1Key = new PublicKey(data.player1);
+              const player2Key = new PublicKey(data.player2);
+              const currentTurnStr = data.currentTurn;
+              const currentTurn: 0 | 1 | 2 = currentTurnStr === DEFAULT_PUBKEY
+                ? 0
+                : (currentTurnStr === data.player1 ? 1 : 2);
+              const boardCards = (data.boardCards ?? []).map(parseServerCard);
+              const showdownCardsP1 = data.showdownCardsP1
+                ? data.showdownCardsP1.map(parseServerCard)
+                : [];
+              const showdownCardsP2 = data.showdownCardsP2
+                ? data.showdownCardsP2.map(parseServerCard)
+                : [];
+              const winnerKey = data.winner && data.winner !== DEFAULT_PUBKEY
+                ? new PublicKey(data.winner)
+                : null;
+
+              // アクションを推測
+              const p1Action = inferAction(
+                prevGame.player1, data.player1Committed, data.player1HasFolded,
+                data.player1IsAllIn, prevGame.phase, serverPhase, data.player2Committed
+              );
+              const p2Action = inferAction(
+                prevGame.player2, data.player2Committed, data.player2HasFolded,
+                data.player2IsAllIn, prevGame.phase, serverPhase, data.player1Committed
+              );
+
+              set({
+                game: {
+                  ...prevGame,
+                  phase: serverPhase,
+                  handNumber: data.handNumber,
+                  pot: data.pot,
+                  currentTurn,
+                  boardCards,
+                  player1: {
+                    ...prevGame.player1,
+                    address: player1Key,
+                    chips: data.player1ChipStack,
+                    chipsCommitted: data.player1Committed,
+                    hasFolded: data.player1HasFolded,
+                    isAllIn: data.player1IsAllIn,
+                    lastAction: p1Action ?? prevGame.player1.lastAction,
+                  },
+                  player2: {
+                    ...prevGame.player2,
+                    address: player2Key,
+                    chips: data.player2ChipStack,
+                    chipsCommitted: data.player2Committed,
+                    hasFolded: data.player2HasFolded,
+                    isAllIn: data.player2IsAllIn,
+                    lastAction: p2Action ?? prevGame.player2.lastAction,
+                  },
+                  player1Key,
+                  player2Key,
+                  winner: winnerKey,
+                  dealerPosition: data.dealerPosition,
+                  lastRaiseAmount: data.lastRaiseAmount,
+                  showdownCardsP1,
+                  showdownCardsP2,
+                },
+              });
+            }
+          } catch {
+            // ポーリングエラーは静かに無視
+          }
+        }, 2000);
+        set({ pollTimer: timer });
+      }
     }).catch(() => set({ isLoading: false }));
   },
 
   unsubscribeFromGame: () => {
-    const { subscriptionEntries } = get();
+    const { subscriptionEntries, pollTimer } = get();
     subscriptionEntries.forEach(({ id, connection: conn }) => {
       conn.removeAccountChangeListener(id);
     });
-    set({ game: null, bettingPool: null, subscriptionEntries: [] });
+    if (pollTimer) {
+      clearInterval(pollTimer);
+    }
+    set({ game: null, bettingPool: null, subscriptionEntries: [], pollTimer: null });
   },
 
   setGame: (game) => set({ game }),

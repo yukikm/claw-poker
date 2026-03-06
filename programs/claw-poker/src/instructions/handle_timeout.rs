@@ -83,6 +83,7 @@ pub struct HandleTimeout<'info> {
         bump = game.bump,
         constraint = game.phase != GamePhase::Waiting @ PokerError::InvalidAction,
         constraint = game.phase != GamePhase::Finished @ PokerError::GameAlreadyCompleted,
+        constraint = game.phase != GamePhase::Showdown @ PokerError::InvalidAction,
         constraint = game.current_turn != Pubkey::default() @ PokerError::InvalidAction,
         constraint = operator.key() == game.operator @ PokerError::PermissionDenied,
     )]

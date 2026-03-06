@@ -224,7 +224,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
     get().fetchGames(connection, programId);
     pollingInterval = setInterval(() => {
       get().fetchGames(connection, programId);
-    }, 10_000);
+    }, 3_000);
   },
 
   stopPolling: () => {

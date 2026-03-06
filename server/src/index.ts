@@ -58,6 +58,9 @@ const prevGameStates = new Map<string, DecodedGameState>();
 /** 現在のハンド内のアクション履歴（gameId → アクション配列） */
 const currentHandActions = new Map<string, HandHistoryEntry[]>();
 
+/** アクション送信中のプレイヤーを追跡（重複送信防止） */
+const pendingActions = new Set<string>();
+
 /**
  * 各ハンド開始時点のチップスタック（gameId → { p1, p2 }）。
  * ショーダウン勝者をチップ差分から判定するために使用する。
@@ -260,7 +263,30 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       });
       return;
     }
+    // currentTurnチェック: 自分のターンでなければ拒否
+    if (currentPhase.currentTurn !== walletAddress) {
+      agentHandler.sendToAgent(walletAddress, {
+        type: 'error',
+        code: 'INVALID_ACTION',
+        message: 'It is not your turn.',
+      });
+      return;
+    }
   }
+
+  // 重複送信防止: 同じプレイヤー・同じハンド・同じフェーズのアクションが処理中なら拒否
+  const handNum = currentPhase?.handNumber ?? 0;
+  const phase = currentPhase?.phase ?? '';
+  const actionKey = `${walletAddress}:${gameIdStr}:${handNum}:${phase}`;
+  if (pendingActions.has(actionKey)) {
+    agentHandler.sendToAgent(walletAddress, {
+      type: 'error',
+      code: 'INVALID_ACTION',
+      message: 'Previous action is still being processed. Please wait.',
+    });
+    return;
+  }
+  pendingActions.add(actionKey);
 
   try {
     // TEEオペレーターとしてプレイヤーアクションをER上で実行
@@ -323,6 +349,8 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       code: 'INVALID_ACTION',
       message: `Failed to submit action: ${err instanceof Error ? err.message : String(err)}`,
     });
+  } finally {
+    pendingActions.delete(actionKey);
   }
 });
 
@@ -554,6 +582,20 @@ async function onGameStateUpdate(
   const gameIdStr = gameId.toString();
   const prevState = prevGameStates.get(gameIdStr);
 
+  // 重複状態フィルタ: バーストポーリングで完全に同じ状態が再度通知された場合はスキップ
+  if (
+    prevState &&
+    prevState.handNumber === state.handNumber &&
+    prevState.phase === state.phase &&
+    prevState.currentTurn === state.currentTurn &&
+    prevState.pot === state.pot &&
+    prevState.lastActionAt === state.lastActionAt &&
+    prevState.player1Committed === state.player1Committed &&
+    prevState.player2Committed === state.player2Committed
+  ) {
+    return;
+  }
+
   // 既存のタイムアウトタイマーをキャンセル（ターンが変わったためリセット）
   const existingTimer = actionTimeoutTimers.get(gameIdStr);
   if (existingTimer) {
@@ -565,9 +607,11 @@ async function onGameStateUpdate(
   const isPlayer2Turn = state.currentTurn === player2Wallet;
 
   // Waiting状態: 次ハンド開始クランクを1回だけ実行
+  // settleHand後のWaiting遷移時（prevState.phase !== 'Waiting'）は即座にクランク実行
   if (state.phase === 'Waiting') {
     const alreadyExecutedAt = waitingCrankExecutedAtHand.get(gameIdStr);
-    if (!waitingCrankInFlight.has(gameIdStr) && alreadyExecutedAt !== state.handNumber) {
+    const isNewTransitionToWaiting = prevState && prevState.phase !== 'Waiting';
+    if (!waitingCrankInFlight.has(gameIdStr) && (isNewTransitionToWaiting || alreadyExecutedAt !== state.handNumber)) {
       waitingCrankInFlight.add(gameIdStr);
       try {
         const isFirstHand = state.handNumber === 0;
@@ -849,21 +893,39 @@ async function onGameStateUpdate(
   }
 
   // C-3: 30秒アクションタイムアウトタイマーを設定
-  // プレイヤーのターン中のみタイマーを起動する（current_turnがデフォルトや終了状態の場合はスキップ）
+  // プレイヤーのターン中のみタイマーを起動する（Showdown/Finished/Waiting/Shufflingは除外）
   if (
     state.phase !== 'Finished' &&
     state.phase !== 'Waiting' &&
     state.phase !== 'Shuffling' &&
+    state.phase !== 'Showdown' &&
     state.currentTurn !== DEFAULT_PUBKEY &&
     (state.currentTurn === player1Wallet || state.currentTurn === player2Wallet)
   ) {
     const currentTurnWallet = state.currentTurn;
+    const currentHandNumber = state.handNumber;
+    const currentPhaseForTimeout = state.phase;
     const timeoutTimer = setTimeout(async () => {
+      // タイムアウト実行前にゲーム状態を再チェック（状態が変わっていたらスキップ）
+      const latestState = prevGameStates.get(gameIdStr);
+      if (latestState) {
+        if (latestState.currentTurn !== currentTurnWallet) {
+          console.log(`[Timeout] Game ${gameIdStr}: turn already changed from ${currentTurnWallet}, skipping`);
+          return;
+        }
+        if (latestState.phase === 'Finished' || latestState.phase === 'Showdown' || latestState.phase === 'Waiting') {
+          console.log(`[Timeout] Game ${gameIdStr}: phase is ${latestState.phase}, skipping timeout`);
+          return;
+        }
+        if (latestState.handNumber !== currentHandNumber || latestState.phase !== currentPhaseForTimeout) {
+          console.log(`[Timeout] Game ${gameIdStr}: hand/phase changed, skipping timeout`);
+          return;
+        }
+      }
       try {
         const timedOutPlayer = new PublicKey(currentTurnWallet);
         console.log(`[Timeout] Game ${gameIdStr}: ${currentTurnWallet} timed out, calling handle_timeout`);
         await anchorClient.handleTimeout(gameId, timedOutPlayer);
-        // トランザクション確認失敗の可能性があるため、バーストポーリングで状態変化をキャプチャ
         gameMonitor.triggerBurstPoll(gameIdStr);
       } catch (err) {
         console.error(`[Timeout] Failed to handle timeout for game ${gameIdStr}:`, err);
@@ -1111,6 +1173,47 @@ app.get('/api/v1/games', (_req: express.Request, res: express.Response) => {
     };
   });
   res.json({ games });
+});
+
+// ─── GET /api/v1/games/:gameId ──────────────────────────────────────────────
+// 個別ゲームの詳細状態を返すAPI。フロントエンドのゲーム詳細ページでポーリング取得に使用。
+app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const gameIdStr = _req.params.gameId;
+  if (!gameIdStr) {
+    res.status(400).json({ error: 'Missing gameId parameter' });
+    return;
+  }
+  const state = prevGameStates.get(gameIdStr);
+  const game = Array.from(activeGames.values()).find((g) => g.gameId.toString() === gameIdStr);
+  if (!state || !game) {
+    res.status(404).json({ error: 'Game not found' });
+    return;
+  }
+  res.json({
+    gameId: gameIdStr,
+    player1: game.player1Wallet,
+    player2: game.player2Wallet,
+    phase: state.phase,
+    handNumber: state.handNumber,
+    pot: state.pot,
+    player1ChipStack: state.player1ChipStack,
+    player2ChipStack: state.player2ChipStack,
+    boardCards: state.boardCards,
+    currentTurn: state.currentTurn,
+    player1Committed: state.player1Committed,
+    player2Committed: state.player2Committed,
+    player1HasFolded: state.player1HasFolded,
+    player2HasFolded: state.player2HasFolded,
+    player1IsAllIn: state.player1IsAllIn,
+    player2IsAllIn: state.player2IsAllIn,
+    bettingClosed: state.bettingClosed,
+    dealerPosition: state.dealerPosition,
+    lastRaiseAmount: state.lastRaiseAmount,
+    showdownCardsP1: state.showdownCardsP1,
+    showdownCardsP2: state.showdownCardsP2,
+    winner: state.winner,
+  });
 });
 
 const httpServer = app.listen(HTTP_PORT, () => {

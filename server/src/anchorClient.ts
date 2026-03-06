@@ -1467,14 +1467,23 @@ export class AnchorClient {
     tx.partialSign(this.operatorKeypair);
 
     const rawTx = tx.serialize();
-    const sig = await connection.sendRawTransaction(rawTx, {
-      skipPreflight: true,
-    });
-    await connection.confirmTransaction(
-      { signature: sig, blockhash, lastValidBlockHeight },
-      'confirmed',
-    );
-    return sig;
+    try {
+      const sig = await connection.sendRawTransaction(rawTx, {
+        skipPreflight: true,
+      });
+      await connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
+      return sig;
+    } catch (err: unknown) {
+      // 重複トランザクションは実質成功（既に処理済み）
+      if (err instanceof Error && err.message.includes('already been processed')) {
+        console.warn('[AnchorClient] Transaction already processed (duplicate), treating as success');
+        return 'already-processed';
+      }
+      throw err;
+    }
   }
 
   /**
