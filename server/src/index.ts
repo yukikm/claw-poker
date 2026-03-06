@@ -342,6 +342,9 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
       };
       agentHandler.sendToAgent(opponentWallet, oppMsg);
     }
+
+    // アクション後の状態変化を即座に検知し、次のyour_turnやクランクをトリガーする
+    await gameMonitor.forcePoll(gameIdStr);
   } catch (err) {
     console.error(`[Action] Failed to submit action for ${walletAddress} in game ${gameIdStr}:`, err);
     agentHandler.sendToAgent(walletAddress, {
@@ -582,7 +585,7 @@ async function onGameStateUpdate(
   const gameIdStr = gameId.toString();
   const prevState = prevGameStates.get(gameIdStr);
 
-  // 重複状態フィルタ: バーストポーリングで完全に同じ状態が再度通知された場合はスキップ
+  // 重複状態フィルタ: 同じ状態が再度通知された場合はスキップ
   if (
     prevState &&
     prevState.handNumber === state.handNumber &&
@@ -595,6 +598,9 @@ async function onGameStateUpdate(
   ) {
     return;
   }
+
+  // 次回比較用に現在の状態を保存（クランク後のforcePollで再入する前に記録する）
+  prevGameStates.set(gameIdStr, state);
 
   // 既存のタイムアウトタイマーをキャンセル（ターンが変わったためリセット）
   const existingTimer = actionTimeoutTimers.get(gameIdStr);
@@ -626,6 +632,7 @@ async function onGameStateUpdate(
         // VRFコールバックはPrivate ERでは動作しないため、即座にフォールバックシャッフルを実行
         await anchorClient.fallbackShuffleAndDeal(gameId, p1, p2);
         waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
+        await gameMonitor.forcePoll(gameIdStr);
       } catch (err) {
         console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
       } finally {
@@ -660,7 +667,6 @@ async function onGameStateUpdate(
         console.log(`[Crank] Game ${gameIdStr}: showdown, revealing cards and settling`);
         await anchorClient.revealShowdownCards(gameId, p1, p2);
         await anchorClient.settleHand(gameId, p1, p2);
-        gameMonitor.triggerBurstPoll(gameIdStr);
       } else if (state.bettingClosed) {
         // AllInランアウト: 残りのコミュニティカードを全公開 → settle_hand
         console.log(`[Crank] Game ${gameIdStr}: all-in runout in ${state.phase}`);
@@ -679,7 +685,6 @@ async function onGameStateUpdate(
         // River + betting_closed → ショーダウンへ
         await anchorClient.revealShowdownCards(gameId, p1, p2);
         await anchorClient.settleHand(gameId, p1, p2);
-        gameMonitor.triggerBurstPoll(gameIdStr);
       } else {
         // 通常のベッティングラウンド終了 → 次のコミュニティカードを公開
         const dc = state.dealCards;
@@ -696,9 +701,7 @@ async function onGameStateUpdate(
         // River終了は player_action.rs で phase=Showdown に設定されるため、
         // ここではなく isShowdown ブランチで処理される
       }
-      // クランク実行後、GameMonitorに状態変化が通知されない可能性がある。
-      // バーストポーリングで確実にオンチェーン状態をキャプチャする。
-      gameMonitor.triggerBurstPoll(gameIdStr);
+      await gameMonitor.forcePoll(gameIdStr);
       bettingEndCrankExecuted.set(gameIdStr, crankKey);
     } catch (err) {
       console.error(`[Crank] Failed betting-end crank for game ${gameIdStr} (phase=${state.phase}):`, err);
@@ -926,7 +929,7 @@ async function onGameStateUpdate(
         const timedOutPlayer = new PublicKey(currentTurnWallet);
         console.log(`[Timeout] Game ${gameIdStr}: ${currentTurnWallet} timed out, calling handle_timeout`);
         await anchorClient.handleTimeout(gameId, timedOutPlayer);
-        gameMonitor.triggerBurstPoll(gameIdStr);
+        await gameMonitor.forcePoll(gameIdStr);
       } catch (err) {
         console.error(`[Timeout] Failed to handle timeout for game ${gameIdStr}:`, err);
       } finally {
@@ -936,8 +939,6 @@ async function onGameStateUpdate(
     actionTimeoutTimers.set(gameIdStr, timeoutTimer);
   }
 
-  // 次回比較用に現在の状態を保存
-  prevGameStates.set(gameIdStr, state);
 }
 
 /**
@@ -1186,8 +1187,36 @@ app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) 
   }
   const state = prevGameStates.get(gameIdStr);
   const game = Array.from(activeGames.values()).find((g) => g.gameId.toString() === gameIdStr);
-  if (!state || !game) {
+  if (!game) {
     res.status(404).json({ error: 'Game not found' });
+    return;
+  }
+  if (!state) {
+    // prevGameStatesが未設定でもactiveGamesから基本情報を返す（初期化直後の一時的な状態）
+    res.json({
+      gameId: gameIdStr,
+      player1: game.player1Wallet,
+      player2: game.player2Wallet,
+      phase: 'Waiting',
+      handNumber: 0,
+      pot: 0,
+      player1ChipStack: STARTING_CHIPS,
+      player2ChipStack: STARTING_CHIPS,
+      boardCards: [],
+      currentTurn: null,
+      player1Committed: 0,
+      player2Committed: 0,
+      player1HasFolded: false,
+      player2HasFolded: false,
+      player1IsAllIn: false,
+      player2IsAllIn: false,
+      bettingClosed: false,
+      dealerPosition: 0,
+      lastRaiseAmount: 0,
+      showdownCardsP1: null,
+      showdownCardsP2: null,
+      winner: null,
+    });
     return;
   }
   res.json({

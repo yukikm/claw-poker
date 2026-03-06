@@ -51,11 +51,6 @@ export type TeeConnectionRefresher = () => Promise<Connection | null>;
 const POLL_INTERVAL_MS = 3_000;
 /** TEE WebSocket健全性チェック間隔 */
 const TEE_HEALTH_CHECK_INTERVAL_MS = 30_000;
-/** クランク実行後のバーストポーリング間隔 */
-const BURST_POLL_INTERVAL_MS = 500;
-/** クランク実行後のバーストポーリング回数 */
-const BURST_POLL_COUNT = 10;
-
 export class GameMonitor {
   private subscriptions = new Map<string, {
     l1Sub: number;
@@ -67,9 +62,6 @@ export class GameMonitor {
     onUpdate: (gameState: DecodedGameState) => void;
     lastUpdateAt: number;
   }>();
-
-  /** クランク実行後のバーストポーリングタイマー（gameId → timer） */
-  private burstPollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** TEE接続リフレッシュ用コールバック（index.tsから注入） */
   private teeConnectionRefresher: TeeConnectionRefresher | null = null;
@@ -132,13 +124,10 @@ export class GameMonitor {
       console.log(`[GameMonitor] Watching game ${gameId} (L1 + public ER only, no TEE)`);
     }
 
-    // TEE WebSocketが死んだ場合のフォールバック: ポーリングで状態を取得する。
-    // Private ERゲームではTEE WebSocketが唯一のリアルタイム通知源のため、
-    // 切断時にゲームが永久にWaiting状態になることを防ぐ。
     let pollTimer: ReturnType<typeof setInterval> | undefined;
     if (teeConnection) {
       pollTimer = setInterval(() => {
-        void this.pollGameState(gameId, gamePda, teeConnection, handleAccountChange);
+        void this.forcePoll(gameId);
       }, POLL_INTERVAL_MS);
     }
 
@@ -164,12 +153,6 @@ export class GameMonitor {
     }
     if (subs.pollTimer) {
       clearInterval(subs.pollTimer);
-    }
-    // バーストポーリングタイマーもクリーンアップ
-    const burstTimer = this.burstPollTimers.get(gameId);
-    if (burstTimer) {
-      clearInterval(burstTimer);
-      this.burstPollTimers.delete(gameId);
     }
     this.subscriptions.delete(gameId);
     console.log(`[GameMonitor] Unwatched game ${gameId}`);
@@ -395,34 +378,6 @@ export class GameMonitor {
     }
   }
 
-  /**
-   * TEE接続経由でゲーム状態をポーリングする。
-   * WebSocket購読が切断された場合のフォールバックとして定期的に呼ばれる。
-   * 最後の更新から一定時間経過している場合のみ実行し、不要なRPC呼び出しを抑制する。
-   */
-  private async pollGameState(
-    gameId: string,
-    gamePda: PublicKey,
-    teeConnection: Connection,
-    handleAccountChange: (info: AccountInfo<Buffer>) => void,
-  ): Promise<void> {
-    const sub = this.subscriptions.get(gameId);
-    if (!sub) return;
-
-    // WebSocketからの更新が最近あった場合はポーリング不要
-    const timeSinceLastUpdate = Date.now() - sub.lastUpdateAt;
-    if (timeSinceLastUpdate < POLL_INTERVAL_MS * 0.8) return;
-
-    try {
-      const connToUse = sub.teeConn ?? teeConnection;
-      const info = await connToUse.getAccountInfo(gamePda, 'confirmed');
-      if (info) {
-        handleAccountChange(info as AccountInfo<Buffer>);
-      }
-    } catch {
-      // ポーリングエラーは静かに無視（WebSocket復旧待ち）
-    }
-  }
 
   /**
    * TEE WebSocket接続の健全性をチェックする。
@@ -485,79 +440,22 @@ export class GameMonitor {
   }
 
   /**
-   * クランク実行後に呼ばれる。指定ゲームのポーリングを短間隔（500ms）で最大10回実行し、
-   * トランザクション実行後のオンチェーン状態変化を確実にキャプチャする。
-   * 既にバーストポーリング中の場合はリセットして再開する。
+   * クランク実行後に呼ばれる。TEEからゲーム状態を即座に読み取り、onUpdateコールバックを実行する。
    */
-  triggerBurstPoll(gameId: string): void {
+  async forcePoll(gameId: string): Promise<void> {
     const sub = this.subscriptions.get(gameId);
-    if (!sub) {
-      console.warn(`[GameMonitor] triggerBurstPoll: game ${gameId} not watched, skipping`);
-      return;
-    }
-
-    // 既存のバーストタイマーをクリア
-    const existingTimer = this.burstPollTimers.get(gameId);
-    if (existingTimer) {
-      clearInterval(existingTimer);
-      this.burstPollTimers.delete(gameId);
-    }
-
-    console.log(`[GameMonitor] Game ${gameId}: starting burst poll (${BURST_POLL_COUNT}x every ${BURST_POLL_INTERVAL_MS}ms) after crank execution`);
-
-    let remaining = BURST_POLL_COUNT;
-    const burstTimer = setInterval(() => {
-      const currentSub = this.subscriptions.get(gameId);
-      if (!currentSub) {
-        const timer = this.burstPollTimers.get(gameId);
-        if (timer) {
-          clearInterval(timer);
-          this.burstPollTimers.delete(gameId);
-        }
-        return;
-      }
-
-      const connToUse = currentSub.teeConn;
-      if (connToUse) {
-        void this.forcePollGameState(gameId, currentSub.gamePda, connToUse, currentSub.onUpdate);
-      }
-
-      remaining--;
-      if (remaining <= 0) {
-        const timer = this.burstPollTimers.get(gameId);
-        if (timer) {
-          clearInterval(timer);
-          this.burstPollTimers.delete(gameId);
-        }
-        console.log(`[GameMonitor] Game ${gameId}: burst poll completed`);
-      }
-    }, BURST_POLL_INTERVAL_MS);
-
-    this.burstPollTimers.set(gameId, burstTimer);
-  }
-
-  /**
-   * 指定ゲームの状態を即座にポーリングする（lastUpdateAtチェックを無視）。
-   * クランク実行後のリカバリーや外部からの強制ポーリングに使用する。
-   */
-  async forcePollGameState(
-    gameId: string,
-    gamePda: PublicKey,
-    teeConnection: Connection,
-    onUpdate: (gameState: DecodedGameState) => void,
-  ): Promise<void> {
+    if (!sub?.teeConn) return;
     try {
-      const info = await teeConnection.getAccountInfo(gamePda, 'confirmed');
+      const info = await sub.teeConn.getAccountInfo(sub.gamePda, 'confirmed');
       if (info) {
         const state = this.decodeGameAccount(info.data);
         if (state) {
-          const sub = this.subscriptions.get(gameId);
-          if (sub) sub.lastUpdateAt = Date.now();
-          onUpdate(state);
+          sub.lastUpdateAt = Date.now();
+          sub.onUpdate(state);
         }
       }
     } catch (err) {
-      console.warn(`[GameMonitor] forcePollGameState failed for game ${gameId}:`, err);
+      console.error(`[GameMonitor] forcePoll failed for game ${gameId}:`, err);
     }
   }
 
@@ -576,11 +474,6 @@ export class GameMonitor {
         clearInterval(sub.pollTimer);
       }
     }
-    // バーストポーリングタイマーもクリーンアップ
-    for (const [, timer] of this.burstPollTimers) {
-      clearInterval(timer);
-    }
-    this.burstPollTimers.clear();
   }
 }
 

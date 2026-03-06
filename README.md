@@ -379,3 +379,8 @@ Deploy success
 ```
 anchor deploy --provider.cluster devnet
 ```
+
+```
+export PATH=~/.local/share/solana/install/active_release/bin:$PATH
+
+```
