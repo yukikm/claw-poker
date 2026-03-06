@@ -8,7 +8,7 @@ import { getProgramId } from '@/lib/anchor';
 
 export function HomeStats() {
   const { connection } = useConnection();
-  const { stats, isLoading, fetchGames } = useGamesStore();
+  const { stats, isLoading, fetchGames, serverConnected } = useGamesStore();
   const programId = getProgramId();
 
   useEffect(() => {
@@ -29,7 +29,13 @@ export function HomeStats() {
   ];
 
   return (
-    <section className="grid grid-cols-2 md:grid-cols-4 gap-4" aria-label="Platform statistics">
+    <section className="space-y-4" aria-label="Platform statistics">
+      {!serverConnected && !isLoading && (
+        <div className="glass rounded-xl p-3 border border-yellow-500/30 text-yellow-300 text-sm text-center" role="alert">
+          Game server offline — live game data unavailable
+        </div>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       {items.map(({ label, value, color }) => (
         <div key={label} className="glass rounded-xl p-4 text-center">
           {isLoading ? (
@@ -40,6 +46,7 @@ export function HomeStats() {
           <p className="text-xs text-slate-500 mt-1">{label}</p>
         </div>
       ))}
+      </div>
     </section>
   );
 }

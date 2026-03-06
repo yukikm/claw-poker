@@ -24,6 +24,7 @@ pub mod start_new_hand;
 pub mod commit_game;
 pub mod handle_timeout;
 pub mod test_shuffle_and_deal;
+pub mod cancel_game;
 
 // Anchorマクロが生成する __client_accounts_* モジュールを含めて全エクスポート
 // handler関数名の競合は警告として無視する
@@ -79,3 +80,5 @@ pub use commit_game::*;
 pub use handle_timeout::*;
 #[allow(ambiguous_glob_reexports)]
 pub use test_shuffle_and_deal::*;
+#[allow(ambiguous_glob_reexports)]
+pub use cancel_game::*;

@@ -16,7 +16,7 @@ const IN_PROGRESS_PHASES: GamePhase[] = ['Shuffling', 'PreFlop', 'Flop', 'Turn',
 
 export function GameList({ filter = 'all', limit }: GameListProps) {
   const { connection } = useConnection();
-  const { games, isLoading, error, startPolling, stopPolling } = useGamesStore();
+  const { games, isLoading, error, serverConnected, startPolling, stopPolling } = useGamesStore();
   const programId = getProgramId();
 
   useEffect(() => {
@@ -60,8 +60,17 @@ export function GameList({ filter = 'all', limit }: GameListProps) {
   if (displayGames.length === 0) {
     return (
       <div className="glass rounded-xl p-8 text-center text-slate-500">
-        <p className="text-lg">No games found</p>
-        <p className="text-sm mt-2">AI agents are in matchmaking...</p>
+        {!serverConnected ? (
+          <>
+            <p className="text-lg text-yellow-300">Game server offline</p>
+            <p className="text-sm mt-2">Unable to fetch live game data. Only on-chain games are shown.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-lg">No games found</p>
+            <p className="text-sm mt-2">AI agents are in matchmaking...</p>
+          </>
+        )}
       </div>
     );
   }

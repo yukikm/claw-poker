@@ -134,6 +134,121 @@
       ]
     },
     {
+      "name": "cancel_game",
+      "docs": [
+        "Waitingフェーズのゲームをキャンセルし、Vault内の資金を両プレイヤーに返金する。",
+        "TEE delegation失敗やサーバークラッシュで停止したゲームのクリーンアップ用。"
+      ],
+      "discriminator": [
+        121,
+        194,
+        154,
+        118,
+        103,
+        235,
+        149,
+        52
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1",
+          "writable": true
+        },
+        {
+          "name": "player2",
+          "writable": true
+        },
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "claim_betting_reward",
       "discriminator": [
         143,
@@ -2728,12 +2843,9 @@
       "name": "test_shuffle_and_deal",
       "docs": [
         "VRFオラクルを経由せずデッキをシャッフルする（フォールバック用）。",
-        "VRFコールバック（callback_deal）が一定時間内に到着しない場合、",
-        "サーバーがオペレーターとしてこの命令を呼び出す。",
-        "セキュリティ:",
-        "- operator制約: オペレーターのみ呼び出し可能",
-        "- Shufflingフェーズ制約: request_shuffle済み（VRFリクエスト発行済み）の場合のみ許可",
-        "- Waitingフェーズからの直接呼び出しはVRFバイパス攻撃となるため拒否"
+        "Private ER（TEE）ではVRF oracle CPIが利用不可のため、",
+        "WaitingまたはShufflingフェーズからオペレーターが直接呼び出す。",
+        "セキュリティ: operator制約によりオペレーターのみ呼び出し可能。"
       ],
       "discriminator": [
         4,
@@ -2926,6 +3038,19 @@
     }
   ],
   "events": [
+    {
+      "name": "GameCancelled",
+      "discriminator": [
+        113,
+        20,
+        200,
+        104,
+        76,
+        35,
+        9,
+        241
+      ]
+    },
     {
       "name": "VrfFallbackUsed",
       "discriminator": [
@@ -3424,6 +3549,22 @@
               "PDAバンプ"
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": "string"
           }
         ]
       }

@@ -478,7 +478,9 @@ async function tryMatchPlayers(): Promise<void> {
     const player1Pubkey = new PublicKey(player1Entry.walletAddress);
     const player2Pubkey = new PublicKey(player2Entry.walletAddress);
 
-    initializeOnChainGame(gameId, player1Pubkey, player2Pubkey, buyIn, player1Entry, player2Entry);
+    void initializeOnChainGame(gameId, player1Pubkey, player2Pubkey, buyIn, player1Entry, player2Entry).catch((err) => {
+      console.error(`[Match] initializeOnChainGame failed for game ${gameId}:`, err);
+    });
   }
 }
 
@@ -628,18 +630,33 @@ async function onGameStateUpdate(
         }
         const p1 = new PublicKey(player1Wallet);
         const p2 = new PublicKey(player2Wallet);
-        const clientSeed = Math.floor(Math.random() * 256);
-        // request_shuffleでShufflingフェーズに遷移 + hand_numberインクリメント
-        await anchorClient.requestShuffle(gameId, p1, p2, clientSeed);
-        // VRFコールバックはPrivate ERでは動作しないため、即座にフォールバックシャッフルを実行
-        await anchorClient.fallbackShuffleAndDeal(gameId, p1, p2);
+        if (anchorClient.isTeeConfigured()) {
+          // Private ER（TEE）ではVRF oracle CPIが利用不可のためrequestShuffleをスキップ。
+          // fallbackShuffleAndDealがWaitingフェーズから直接hand_numberインクリメント+シャッフルを実行。
+          console.log(`[Crank] Game ${gameIdStr}: TEE mode, using direct fallback shuffle`);
+          await anchorClient.fallbackShuffleAndDeal(gameId, p1, p2);
+        } else {
+          const clientSeed = Math.floor(Math.random() * 256);
+          // request_shuffleでShufflingフェーズに遷移 + hand_numberインクリメント
+          await anchorClient.requestShuffle(gameId, p1, p2, clientSeed);
+          // VRFコールバック待ち後のフォールバック
+          await anchorClient.fallbackShuffleAndDeal(gameId, p1, p2);
+        }
         waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
         console.log(`[Crank] Game ${gameIdStr}: shuffle+deal complete, polling for PreFlop state`);
         await gameMonitor.forcePoll(gameIdStr);
       } catch (err) {
         console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
-        // クランク失敗時はprevGameStatesをクリアしてリトライ可能にする
         prevGameStates.delete(gameIdStr);
+        // TEE接続エラー時の高頻度リトライを防止: 次のポーリングまで待機
+        waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
+        // 10秒後にリトライ可能にする
+        setTimeout(() => {
+          if (waitingCrankExecutedAtHand.get(gameIdStr) === state.handNumber) {
+            waitingCrankExecutedAtHand.delete(gameIdStr);
+            prevGameStates.delete(gameIdStr);
+          }
+        }, 10_000);
       } finally {
         waitingCrankInFlight.delete(gameIdStr);
       }
@@ -1291,6 +1308,15 @@ function shutdown(): void {
   httpServer.close();
   process.exit(0);
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection:', reason);
+});
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

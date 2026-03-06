@@ -27,6 +27,7 @@ interface GamesStore {
   stats: GamesStats;
   isLoading: boolean;
   error: string | null;
+  serverConnected: boolean;
   fetchGames: (connection: Connection, programId: PublicKey) => Promise<void>;
   updateGame: (gamePda: PublicKey, update: Partial<GameSummary>) => void;
   startPolling: (connection: Connection, programId: PublicKey) => void;
@@ -64,6 +65,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
   stats: INITIAL_STATS,
   isLoading: false,
   error: null,
+  serverConnected: false,
 
   fetchGames: async (connection: Connection, programId: PublicKey) => {
     set({ isLoading: true, error: null });
@@ -88,10 +90,17 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         player2ChipStack: number;
         bettingClosed: boolean;
       }
+      let serverConnected = false;
       const serverGamesPromise: Promise<ServerGame[]> = fetch(`${SERVER_API_URL}/api/v1/games`)
-        .then((r) => r.json() as Promise<{ games: ServerGame[] }>)
+        .then((r) => {
+          serverConnected = true;
+          return r.json() as Promise<{ games: ServerGame[] }>;
+        })
         .then((data) => data.games)
-        .catch(() => [] as ServerGame[]);
+        .catch(() => {
+          serverConnected = false;
+          return [] as ServerGame[];
+        });
 
       const [erGameAccounts, l1GameAccounts, poolAccounts, serverGames] = await Promise.all([
         erProgram.account.game.all().catch(() => []),
@@ -204,10 +213,10 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         totalBettors,
       };
 
-      set({ games, stats, isLoading: false });
+      set({ games, stats, isLoading: false, serverConnected });
     } catch (err) {
       console.error('[gamesStore] fetchGames error:', err);
-      set({ error: 'Failed to load games. Please try again later.', isLoading: false });
+      set({ error: 'Failed to load games. Please try again later.', isLoading: false, serverConnected });
     }
   },
 

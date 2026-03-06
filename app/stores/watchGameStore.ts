@@ -322,7 +322,7 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
       // サーバーAPIポーリング開始: ゲームIDが判明したらTEE上の最新状態を定期取得
       if (gameState) {
         const gameIdStr = gameState.gameId.toString();
-        const SERVER_API_URL = process.env.NEXT_PUBLIC_SERVER_API_URL ?? 'http://localhost:3001';
+        const SERVER_API_URL = process.env.NEXT_PUBLIC_SERVER_API_URL ?? 'http://43.206.193.46:3001';
         const timer = setInterval(async () => {
           try {
             const resp = await fetch(`${SERVER_API_URL}/api/v1/games/${gameIdStr}`);

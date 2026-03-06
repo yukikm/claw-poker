@@ -971,10 +971,10 @@ export class AnchorClient {
   }
 
   /**
-   * request_shuffle後にデッキシャッフルとホールカード配布を実行する。
+   * request_shuffle後またはWaitingフェーズからデッキシャッフルとホールカード配布を実行する。
    * サーバー側で暗号学的乱数を生成し、test_shuffle_and_deal命令を直接呼び出す。
-   * フェーズがShuffling（requestShuffle実行済み）の場合にのみ使用可能。
-   * Waitingフェーズからの呼び出しはオンチェーン制約により拒否される（VRFバイパス防止）。
+   * フェーズがShuffling（requestShuffle実行済み）またはWaiting（Private ERでVRF不可）の場合に使用可能。
+   * Waitingからの呼び出し時はhand_numberがオンチェーンで自動インクリメントされる。
    */
   async fallbackShuffleAndDeal(
     gameId: bigint,
@@ -1062,6 +1062,36 @@ export class AnchorClient {
     });
     await this.l1Connection.confirmTransaction(sig, 'confirmed');
     console.log(`[AnchorClient] Refunded ${lamports} lamports to ${playerPubkey.toBase58()}: ${sig}`);
+  }
+
+  /**
+   * Waitingフェーズのゲームをキャンセルし、Vault内の資金を両プレイヤーに返金する。
+   * TEE delegation失敗やサーバークラッシュで停止したゲームのクリーンアップ用。
+   */
+  async cancelGame(gameId: bigint, player1: PublicKey, player2: PublicKey): Promise<string> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const [vaultPda] = this.deriveVaultPda(gameId);
+    const [bettingPoolPda] = this.deriveBettingPoolPda(gameId);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    const txSig = await (this.l1Program.methods as unknown as {
+      cancelGame: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .cancelGame(new BN(gameId.toString()))
+      .accounts({
+        game: gamePda,
+        gameVault: vaultPda,
+        player1,
+        player2,
+        bettingPool: bettingPoolPda,
+        operator: operatorPubkey,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] Game ${gameId} cancelled, refund tx: ${txSig}`);
+    return txSig;
   }
 
   /**
@@ -1471,10 +1501,17 @@ export class AnchorClient {
       const sig = await connection.sendRawTransaction(rawTx, {
         skipPreflight: true,
       });
-      await connection.confirmTransaction(
+      const confirmation = await connection.confirmTransaction(
         { signature: sig, blockhash, lastValidBlockHeight },
         'confirmed',
       );
+      // skipPreflight: true ではプログラムエラーが sendRawTransaction で検出されない。
+      // confirmTransaction の結果で実際のオンチェーンエラーを検出する。
+      if (confirmation.value.err) {
+        throw new Error(
+          `Transaction confirmed but failed on-chain: ${JSON.stringify(confirmation.value.err)} (sig: ${sig})`,
+        );
+      }
       return sig;
     } catch (err: unknown) {
       // 重複トランザクションは実質成功（既に処理済み）

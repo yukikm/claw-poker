@@ -15,10 +15,20 @@ pub fn handler(ctx: Context<TestShuffleAndDeal>, _game_id: u64, random_seed: [u8
     let game = &mut ctx.accounts.game;
 
     // フォールバックはShufflingフェーズ（request_shuffleでVRFリクエスト済み、
-    // callback_deal未到着）の場合のみ許可。Waitingフェーズからの直接呼び出しは
-    // VRFバイパス攻撃になるためアカウント制約で拒否する。
-    // request_shuffleで既にhand_numberがインクリメント済みなので再インクリメント不要。
-    let next_hand = game.hand_number;
+    // callback_deal未到着）またはWaitingフェーズ（Private ERでVRF CPI不可）で許可。
+    // Private ER（TEE）ではVRF oracleが利用不可のためrequest_shuffleが失敗する。
+    // Waitingからの直接呼び出し時はhand_numberを自前でインクリメントする。
+    // セキュリティ: operator制約によりオペレーターのみ呼び出し可能。
+    let next_hand = if game.phase == GamePhase::Waiting {
+        let h = game.hand_number
+            .checked_add(1)
+            .ok_or(PokerError::PotOverflow)?;
+        game.hand_number = h;
+        h
+    } else {
+        // Shufflingフェーズ: request_shuffleで既にhand_numberインクリメント済み
+        game.hand_number
+    };
 
     // Fisher-Yatesシャッフルでデッキをシャッフル
     let deck = shuffle_deck(&random_seed, next_hand);
@@ -161,7 +171,7 @@ pub struct TestShuffleAndDeal<'info> {
         mut,
         seeds = [b"game", game_id.to_le_bytes().as_ref()],
         bump = game.bump,
-        constraint = game.phase == GamePhase::Shuffling @ PokerError::InvalidAction,
+        constraint = (game.phase == GamePhase::Waiting || game.phase == GamePhase::Shuffling) @ PokerError::InvalidAction,
         constraint = operator.key() == game.operator @ PokerError::PermissionDenied,
     )]
     pub game: Account<'info, Game>,

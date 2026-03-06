@@ -26,6 +26,9 @@ export function createX402Router(
 ): X402RouterResult {
   const router = express.Router();
 
+  // 同一プレイヤーの二重リクエストを防止するインフライトガード
+  const queueJoinInFlight = new Set<string>();
+
   // x402ミドルウェアを試みるが、パッケージ未インストール時はスキップ
   let middlewareApplied = false;
 
@@ -142,6 +145,13 @@ export function createX402Router(
       return;
     }
 
+    // 同一プレイヤーの二重リクエスト防止
+    if (queueJoinInFlight.has(walletAddress)) {
+      res.status(409).json({ error: 'Queue join already in progress for this wallet' });
+      return;
+    }
+    queueJoinInFlight.add(walletAddress);
+
     // x402ミドルウェアが検証した支払い額と一致する固定値を使用
     // クライアントからのentryFeeSolは受け付けず、サーバー設定値を優先する
     const entryFeeLamports = BigInt(Math.floor(DEFAULT_ENTRY_FEE_SOL * LAMPORTS_PER_SOL));
@@ -208,6 +218,8 @@ export function createX402Router(
           details: err instanceof Error ? err.message : String(err),
         });
       }
+    } finally {
+      queueJoinInFlight.delete(walletAddress);
     }
   });
 
