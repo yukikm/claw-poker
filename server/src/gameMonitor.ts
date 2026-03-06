@@ -59,7 +59,7 @@ export class GameMonitor {
     teeConn?: Connection;
     pollTimer?: ReturnType<typeof setInterval>;
     gamePda: PublicKey;
-    onUpdate: (gameState: DecodedGameState) => void;
+    onUpdate: (gameState: DecodedGameState) => Promise<void>;
     lastUpdateAt: number;
   }>();
 
@@ -92,7 +92,7 @@ export class GameMonitor {
     gamePda: PublicKey,
     l1Connection: Connection,
     erConnection: Connection,
-    onUpdate: (gameState: DecodedGameState) => void,
+    onUpdate: (gameState: DecodedGameState) => Promise<void>,
     teeConnection?: Connection,
   ): void {
     if (this.subscriptions.has(gameId)) {
@@ -105,7 +105,10 @@ export class GameMonitor {
         if (state) {
           const sub = this.subscriptions.get(gameId);
           if (sub) sub.lastUpdateAt = Date.now();
-          onUpdate(state);
+          // onUpdate is async - catch errors to prevent unhandled rejections
+          Promise.resolve(onUpdate(state)).catch((err) => {
+            console.error(`[GameMonitor] onUpdate callback error for game ${gameId}:`, err);
+          });
         }
       } catch (err) {
         console.error(`[GameMonitor] Failed to decode game account for ${gameId}:`, err);
@@ -423,7 +426,9 @@ export class GameMonitor {
             const state = this.decodeGameAccount(accountInfo.data);
             if (state) {
               sub.lastUpdateAt = Date.now();
-              sub.onUpdate(state);
+              Promise.resolve(sub.onUpdate(state)).catch((err) => {
+                console.error(`[GameMonitor] onUpdate callback error for game ${gameId}:`, err);
+              });
             }
           } catch (err) {
             console.error(`[GameMonitor] Failed to decode game account for ${gameId}:`, err);
@@ -444,15 +449,23 @@ export class GameMonitor {
    */
   async forcePoll(gameId: string): Promise<void> {
     const sub = this.subscriptions.get(gameId);
-    if (!sub?.teeConn) return;
+    if (!sub?.teeConn) {
+      console.warn(`[GameMonitor] forcePoll: no TEE connection for game ${gameId}`);
+      return;
+    }
     try {
       const info = await sub.teeConn.getAccountInfo(sub.gamePda, 'confirmed');
       if (info) {
         const state = this.decodeGameAccount(info.data);
         if (state) {
           sub.lastUpdateAt = Date.now();
-          sub.onUpdate(state);
+          console.log(`[GameMonitor] forcePoll: game ${gameId} phase=${state.phase} hand=${state.handNumber} turn=${state.currentTurn.slice(0, 8)}...`);
+          await sub.onUpdate(state);
+        } else {
+          console.warn(`[GameMonitor] forcePoll: decode returned null for game ${gameId}`);
         }
+      } else {
+        console.warn(`[GameMonitor] forcePoll: account not found for game ${gameId}`);
       }
     } catch (err) {
       console.error(`[GameMonitor] forcePoll failed for game ${gameId}:`, err);

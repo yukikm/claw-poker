@@ -599,6 +599,8 @@ async function onGameStateUpdate(
     return;
   }
 
+  console.log(`[StateUpdate] Game ${gameIdStr}: phase=${state.phase} hand=${state.handNumber} turn=${state.currentTurn.slice(0, 8)}... pot=${state.pot} prev=${prevState?.phase ?? 'none'}`);
+
   // 次回比較用に現在の状態を保存（クランク後のforcePollで再入する前に記録する）
   prevGameStates.set(gameIdStr, state);
 
@@ -632,9 +634,12 @@ async function onGameStateUpdate(
         // VRFコールバックはPrivate ERでは動作しないため、即座にフォールバックシャッフルを実行
         await anchorClient.fallbackShuffleAndDeal(gameId, p1, p2);
         waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
+        console.log(`[Crank] Game ${gameIdStr}: shuffle+deal complete, polling for PreFlop state`);
         await gameMonitor.forcePoll(gameIdStr);
       } catch (err) {
         console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
+        // クランク失敗時はprevGameStatesをクリアしてリトライ可能にする
+        prevGameStates.delete(gameIdStr);
       } finally {
         waitingCrankInFlight.delete(gameIdStr);
       }
@@ -831,9 +836,6 @@ async function onGameStateUpdate(
   }
 
   // ターン変更時のみyour_turnを送信（Waiting/Shuffling/Showdown/Finishedフェーズ中は送信しない）
-  // Waiting/Shufflingではカードが配られておらず、アクション送信は不正。
-  // initializeGame直後のfetchInitialStateでcurrentTurnが設定済みでも、
-  // fallbackShuffleAndDealがPreFlopへ遷移するまで待機する必要がある。
   const turnChanged = prevState?.currentTurn !== state.currentTurn;
   const isPlayingPhase = state.phase === 'PreFlop' || state.phase === 'Flop'
     || state.phase === 'Turn' || state.phase === 'River';
@@ -841,58 +843,67 @@ async function onGameStateUpdate(
     prevState.phase === 'PreFlop' || prevState.phase === 'Flop'
     || prevState.phase === 'Turn' || prevState.phase === 'River'
   );
-  // your_turnを送信する条件:
-  // 1. プレイ中フェーズ（PreFlop/Flop/Turn/River）であること
-  // 2. 以下のいずれかが成立:
-  //    a) ターンが変わった（通常のアクション後）
-  //    b) 非プレイ中フェーズからプレイ中フェーズに遷移した（fallbackShuffleAndDeal後のPreFlop開始時）
-  //       initializeGameでcurrentTurn=player1、fallbackShuffleAndDealでもcurrentTurn=player1の場合、
-  //       turnChangedがfalseになるため、フェーズ遷移でもyour_turnを送信する必要がある
-  if ((isPlayer1Turn || isPlayer2Turn) && (turnChanged || prevWasNotPlaying) && isPlayingPhase) {
-    const activeWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
-    const myStack = isPlayer1Turn ? state.player1ChipStack : state.player2ChipStack;
-    const opponentStack = isPlayer1Turn ? state.player2ChipStack : state.player1ChipStack;
-    const myCommitted = isPlayer1Turn ? state.player1Committed : state.player2Committed;
-    const oppCommitted = isPlayer1Turn ? state.player2Committed : state.player1Committed;
-    const currentBet = Math.max(state.player1Committed, state.player2Committed);
+  const shouldSendYourTurn = (isPlayer1Turn || isPlayer2Turn) && (turnChanged || prevWasNotPlaying) && isPlayingPhase;
 
-    const validActions = calculateValidActions(state, isPlayer1Turn);
-    const minBet = state.currentBigBlind;
-    const minRaise = oppCommitted + state.lastRaiseAmount;
+  if (shouldSendYourTurn) {
+    try {
+      const activeWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
+      const myStack = isPlayer1Turn ? state.player1ChipStack : state.player2ChipStack;
+      const opponentStack = isPlayer1Turn ? state.player2ChipStack : state.player1ChipStack;
+      const myCommitted = isPlayer1Turn ? state.player1Committed : state.player2Committed;
+      const oppCommitted = isPlayer1Turn ? state.player2Committed : state.player1Committed;
+      const currentBet = Math.max(state.player1Committed, state.player2Committed);
 
-    const phaseMap: Record<string, 'pre_flop' | 'flop' | 'turn' | 'river'> = {
-      PreFlop: 'pre_flop',
-      Flop: 'flop',
-      Turn: 'turn',
-      River: 'river',
-    };
-    const phase = phaseMap[state.phase] ?? 'pre_flop';
+      const validActions = calculateValidActions(state, isPlayer1Turn);
+      const minBet = state.currentBigBlind;
+      const minRaise = oppCommitted + state.lastRaiseAmount;
 
-    // PlayerStateからホールカードを読み取り
-    const playerWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
-    const playerPubkey = new PublicKey(playerWallet);
-    const holeCards = await anchorClient.getPlayerHoleCards(gameId, playerPubkey) ?? ['??', '??'];
+      const phaseMap: Record<string, 'pre_flop' | 'flop' | 'turn' | 'river'> = {
+        PreFlop: 'pre_flop',
+        Flop: 'flop',
+        Turn: 'turn',
+        River: 'river',
+      };
+      const phase = phaseMap[state.phase] ?? 'pre_flop';
 
-    agentHandler.sendToAgent(activeWallet, {
-      type: 'your_turn',
-      gameId: gameIdStr,
-      handNumber: state.handNumber,
-      phase,
-      holeCards,
-      communityCards: state.boardCards,
-      myStack,
-      opponentStack,
-      pot: state.pot,
-      currentBet,
-      myCurrentBet: myCommitted,
-      validActions,
-      minBet,
-      minRaise,
-      maxRaise: myStack,
-      timeoutSeconds: 30,
-      dealerPosition: state.dealerPosition === 0 ? 'player1' : 'player2',
-      handHistory: currentHandActions.get(gameIdStr) ?? [],
-    });
+      // PlayerStateからホールカードを読み取り
+      const playerWallet = isPlayer1Turn ? player1Wallet : player2Wallet;
+      const playerPubkey = new PublicKey(playerWallet);
+      let holeCards: [string, string] = ['??', '??'];
+      try {
+        holeCards = await anchorClient.getPlayerHoleCards(gameId, playerPubkey) ?? ['??', '??'];
+      } catch (err) {
+        console.error(`[YourTurn] Failed to get hole cards for ${playerWallet} in game ${gameIdStr}:`, err);
+      }
+
+      console.log(`[YourTurn] Sending your_turn to ${activeWallet.slice(0, 8)}... game=${gameIdStr} phase=${phase} hand=${state.handNumber} cards=${holeCards.join(',')}`);
+      agentHandler.sendToAgent(activeWallet, {
+        type: 'your_turn',
+        gameId: gameIdStr,
+        handNumber: state.handNumber,
+        phase,
+        holeCards,
+        communityCards: state.boardCards,
+        myStack,
+        opponentStack,
+        pot: state.pot,
+        currentBet,
+        myCurrentBet: myCommitted,
+        validActions,
+        minBet,
+        minRaise,
+        maxRaise: myStack,
+        timeoutSeconds: 30,
+        dealerPosition: state.dealerPosition === 0 ? 'player1' : 'player2',
+        handHistory: currentHandActions.get(gameIdStr) ?? [],
+      });
+    } catch (err) {
+      console.error(`[YourTurn] Failed to send your_turn for game ${gameIdStr}:`, err);
+      // your_turn送信失敗時はprevGameStatesをクリアしてリトライ可能にする
+      prevGameStates.delete(gameIdStr);
+    }
+  } else if (isPlayingPhase && (isPlayer1Turn || isPlayer2Turn)) {
+    console.log(`[YourTurn] Skipped: game=${gameIdStr} turnChanged=${turnChanged} prevWasNotPlaying=${prevWasNotPlaying} prevPhase=${prevState?.phase ?? 'none'}`);
   }
 
   // C-3: 30秒アクションタイムアウトタイマーを設定

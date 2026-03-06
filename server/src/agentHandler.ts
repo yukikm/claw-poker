@@ -317,11 +317,20 @@ export class AgentHandler {
 
   sendToAgent(walletAddress: string, message: ServerMessage): void {
     const sessionId = this.walletToSession.get(walletAddress);
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn(`[AgentHandler] sendToAgent: no session for ${walletAddress.slice(0, 8)}... (type=${message.type})`);
+      return;
+    }
 
     const session = this.sessions.get(sessionId);
-    if (!session) return;
+    if (!session) {
+      console.warn(`[AgentHandler] sendToAgent: session ${sessionId} not found for ${walletAddress.slice(0, 8)}... (type=${message.type})`);
+      return;
+    }
 
+    if (session.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[AgentHandler] sendToAgent: WS not open for ${walletAddress.slice(0, 8)}... (state=${session.ws.readyState}, type=${message.type})`);
+    }
     this.sendMessage(session.ws, message);
   }
 
