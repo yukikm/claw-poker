@@ -605,8 +605,10 @@ export class AnchorClient {
     const [player2StatePda] = this.derivePlayerStatePda(gameId, player2);
     const [vaultPda] = this.deriveVaultPda(gameId);
     const operatorPubkey = this.operatorKeypair.publicKey;
+    const gid = gameId.toString();
 
     // Step 1: initialize_game
+    console.log(`[InitGame:${gid}] Step 1/12: initialize_game...`);
     await (this.l1Program.methods as unknown as {
       initializeGame: (
         gameId: BN,
@@ -633,8 +635,10 @@ export class AnchorClient {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+    console.log(`[InitGame:${gid}] Step 1 done`);
 
     // Step 2: create_game_vault（QueueからVaultへ資金移動）
+    console.log(`[InitGame:${gid}] Step 2/12: create_game_vault...`);
     await (this.l1Program.methods as unknown as {
       createGameVault: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -649,8 +653,10 @@ export class AnchorClient {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+    console.log(`[InitGame:${gid}] Step 2 done`);
 
     // Step 3: initialize_betting_pool（観戦者ベット受付用）
+    console.log(`[InitGame:${gid}] Step 3/12: initialize_betting_pool...`);
     const [bettingPoolPda] = this.deriveBettingPoolPda(gameId);
     await (this.l1Program.methods as unknown as {
       initializeBettingPool: (gameId: BN) => {
@@ -665,6 +671,7 @@ export class AnchorClient {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+    console.log(`[InitGame:${gid}] Step 3 done`);
 
     // ── MagicBlock Private ER 初期化フロー ──────────────────────────────────
     // Permission PDA 導出（Game + Player1State + Player2State 用）
@@ -673,6 +680,7 @@ export class AnchorClient {
     const permissionP2   = this.derivePermissionPda(player2StatePda);
 
     // Step 4: create_permission_game（Game は public: members: None）
+    console.log(`[InitGame:${gid}] Step 4/12: create_permission_game...`);
     await (this.l1Program.methods as unknown as {
       createPermissionGame: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -688,7 +696,9 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 4 done`);
     // Step 5: create_permission_player1（player + operator を ACL に追加）
+    console.log(`[InitGame:${gid}] Step 5/12: create_permission_player1...`);
     await (this.l1Program.methods as unknown as {
       createPermissionPlayer1: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -706,7 +716,9 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 5 done`);
     // Step 6: create_permission_player2
+    console.log(`[InitGame:${gid}] Step 6/12: create_permission_player2...`);
     await (this.l1Program.methods as unknown as {
       createPermissionPlayer2: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -724,11 +736,13 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 6 done`);
     // Step 7: delegate_permission_game（Game Permission PDA を ER に委譲）
     // ※ Permission委譲は account委譲より先に実行する必要がある。
     //   account委譲後はgame/player_stateオーナーがDELEGATION_PROGに変わり、
     //   Anchorのアカウント型チェックが失敗するため。
     // ※ Permission PDAのバッファはowner_program = PERMISSION_PROGで導出する。
+    console.log(`[InitGame:${gid}] Step 7/12: delegate_permission_game...`);
     await (this.l1Program.methods as unknown as {
       delegatePermissionGame: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -748,8 +762,10 @@ export class AnchorClient {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+    console.log(`[InitGame:${gid}] Step 7 done`);
 
     // Step 8: delegate_permission_player1（Player1 Permission PDA を ER に委譲）
+    console.log(`[InitGame:${gid}] Step 8/12: delegate_permission_player1...`);
     await (this.l1Program.methods as unknown as {
       delegatePermissionPlayer1: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -771,7 +787,9 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 8 done`);
     // Step 9: delegate_permission_player2
+    console.log(`[InitGame:${gid}] Step 9/12: delegate_permission_player2...`);
     await (this.l1Program.methods as unknown as {
       delegatePermissionPlayer2: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -793,8 +811,10 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 9 done`);
     // Step 10: delegate_game（Game データアカウントを ER に委譲）
     // ※ Permission委譲完了後にアカウント委譲を実行する
+    console.log(`[InitGame:${gid}] Step 10/12: delegate_game...`);
     await (this.l1Program.methods as unknown as {
       delegateGame: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -814,7 +834,9 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 10 done`);
     // Step 11: delegate_player1（Player1State データアカウントを ER に委譲）
+    console.log(`[InitGame:${gid}] Step 11/12: delegate_player1...`);
     await (this.l1Program.methods as unknown as {
       delegatePlayer1: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
@@ -835,7 +857,9 @@ export class AnchorClient {
       })
       .rpc();
 
+    console.log(`[InitGame:${gid}] Step 11 done`);
     // Step 12: delegate_player2
+    console.log(`[InitGame:${gid}] Step 12/12: delegate_player2...`);
     const txSig = await (this.l1Program.methods as unknown as {
       delegatePlayer2: (gameId: BN) => {
         accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };

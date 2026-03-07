@@ -14,6 +14,17 @@ import { QueueJoinedMessage, GameJoinedMessage, GameStateMessage, OpponentAction
 
 config();
 
+// ── In-memory log ring buffer (最新200件をHTTPで取得可能) ──
+const LOG_BUFFER_SIZE = 200;
+const logBuffer: string[] = [];
+function pushLog(msg: string): void {
+  const ts = new Date().toISOString();
+  const line = `[${ts}] ${msg}`;
+  logBuffer.push(line);
+  if (logBuffer.length > LOG_BUFFER_SIZE) logBuffer.shift();
+  console.log(msg);
+}
+
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 const HTTP_PORT = process.env.HTTP_PORT ? parseInt(process.env.HTTP_PORT, 10) : 3001;
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
@@ -516,7 +527,7 @@ async function initializeOnChainGame(
 ): Promise<void> {
   try {
     await anchorClient.initializeGame(gameId, player1, player2, buyIn);
-    console.log(`[OnChain] Game ${gameId} initialized on-chain`);
+    pushLog(`[OnChain] Game ${gameId} initialized on-chain successfully`);
 
     // マッチ成立後はオンチェーンQueueから双方を削除する。
     // Queueは参加者トラッキング用途であり、残置すると次回join時にAlreadyInQueueになる。
@@ -546,6 +557,7 @@ async function initializeOnChainGame(
       teeConnForMonitor ?? undefined,
     );
   } catch (err) {
+    pushLog(`[OnChain] Failed to initialize game ${gameId}: ${err instanceof Error ? err.message : String(err)}`);
     console.error(`[OnChain] Failed to initialize game ${gameId}:`, err);
     activeGames.delete(gameId);
 
@@ -1313,6 +1325,26 @@ app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) 
     showdownCardsP2: state.showdownCardsP2,
     winner: state.winner,
   });
+});
+
+// ─── GET /api/v1/admin/health ──────────────────────────────────────────────
+app.get('/api/v1/admin/health', (_req: express.Request, res: express.Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    activeGames: activeGames.size,
+    connectedAgents: agentHandler.getConnectedAgentCount?.() ?? 'N/A',
+    memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+  });
+});
+
+// ─── GET /api/v1/admin/logs ───────────────────────────────────────────────
+app.get('/api/v1/admin/logs', (req: express.Request, res: express.Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const n = parseInt(req.query.n as string, 10) || 50;
+  const lines = logBuffer.slice(-n);
+  res.json({ count: lines.length, logs: lines });
 });
 
 const httpServer = app.listen(HTTP_PORT, () => {
