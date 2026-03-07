@@ -69,6 +69,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
 
   fetchGames: async (connection: Connection, programId: PublicKey) => {
     set({ isLoading: true, error: null });
+    let serverConnected = false;
     try {
       // ER をまず試し、取得できなければ L1 にフォールバック。
       // デリゲーション後は ER がアクティブなゲームを保持し、L1 は完了ゲームや未デリゲートゲームを保持する。
@@ -90,7 +91,6 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         player2ChipStack: number;
         bettingClosed: boolean;
       }
-      let serverConnected = false;
       const serverGamesPromise: Promise<ServerGame[]> = fetch(`${SERVER_API_URL}/api/v1/games`)
         .then((r) => {
           serverConnected = true;
