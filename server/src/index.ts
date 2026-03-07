@@ -1185,6 +1185,33 @@ const { router: x402Router, isPaymentEnabled } = createX402Router(
 );
 app.use(x402Router);
 
+// ─── POST /api/v1/admin/queue/clear ─────────────────────────────────────────
+// オンチェーンキュー内の全プレイヤーを除去する管理エンドポイント。
+// テスト後のキュー残留プレイヤーをクリーンアップするために使用。
+app.post('/api/v1/admin/queue/clear', async (_req: express.Request, res: express.Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const queueData = await anchorClient.fetchMatchmakingQueue();
+    const players: string[] = [];
+    for (const entry of queueData) {
+      if (entry) {
+        try {
+          await anchorClient.leaveMatchmakingQueue(new PublicKey(entry.player));
+          players.push(entry.player);
+        } catch (err) {
+          console.error(`[Admin] Failed to remove ${entry.player} from queue:`, err);
+        }
+      }
+    }
+    // サーバー側のメモリキューもクリア
+    matchmakingQueue.length = 0;
+    res.json({ success: true, removed: players });
+  } catch (err) {
+    console.error('[Admin] Queue clear failed:', err);
+    res.status(500).json({ error: 'Failed to clear queue', details: String(err) });
+  }
+});
+
 // ─── GET /api/v1/games ──────────────────────────────────────────────────────
 // フロントエンドがプライベートER上の進行中ゲームを取得するためのAPI。
 // プライベートER（TEE）のゲームアカウントは公開ERに存在しないため、

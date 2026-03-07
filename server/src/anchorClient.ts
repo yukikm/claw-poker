@@ -1250,6 +1250,38 @@ export class AnchorClient {
   }
 
   /**
+   * オンチェーンのMatchmakingQueueアカウントを読み取り、キュー内のエントリーを返す。
+   */
+  async fetchMatchmakingQueue(): Promise<Array<{ player: string; entryFeePaid: number; joinedAt: number } | null>> {
+    const [queuePda] = this.deriveMatchmakingQueuePda();
+    const info = await this.l1Connection.getAccountInfo(queuePda);
+    if (!info) return [];
+
+    // Borsh decode: 8 (disc) + 10 * (1 + Option<QueueEntry>) + 1 (head) + 1 (tail) + 1 (bump) + 32 (operator)
+    // QueueEntry = 32 (player) + 8 (entry_fee_paid) + 8 (joined_at) = 48 bytes
+    // Option<QueueEntry> = 1 (tag) + 48 (if Some) = 1 or 49
+    const data = info.data;
+    let offset = 8; // skip discriminator
+    const entries: Array<{ player: string; entryFeePaid: number; joinedAt: number } | null> = [];
+    for (let i = 0; i < 10; i++) {
+      const tag = data[offset];
+      offset += 1;
+      if (tag === 1) {
+        const player = new PublicKey(data.subarray(offset, offset + 32)).toBase58();
+        offset += 32;
+        const entryFeePaid = Number(data.readBigUInt64LE(offset));
+        offset += 8;
+        const joinedAt = Number(data.readBigInt64LE(offset));
+        offset += 8;
+        entries.push({ player, entryFeePaid, joinedAt });
+      } else {
+        entries.push(null);
+      }
+    }
+    return entries;
+  }
+
+  /**
    * x402支払い検証後にオペレーターが呼び出すキュー登録命令。
    * SOL転送はx402プロトコルが担当し、このメソッドはキュー登録のみ行う。
    */
