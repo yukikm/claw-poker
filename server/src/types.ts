@@ -199,6 +199,7 @@ export interface AuthenticateMessage {
   walletAddress: string;
   signature: string;
   nonce: string;
+  agentName?: string;
 }
 
 /**
@@ -274,6 +275,7 @@ export interface AgentSession {
   ws: WsWebSocket;
   sessionId: string;
   walletAddress: string | null;
+  agentName: string | null;
   nonce: string | null;
   nonceExpiresAt: number | null;
   token: string | null;

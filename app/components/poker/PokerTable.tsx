@@ -19,12 +19,14 @@ function AgentPanel({
   isCurrentTurn,
   isDealer,
   showdownCards,
+  agentName,
 }: {
   agent: GameState['player1'];
   position: 'left' | 'right';
   isCurrentTurn: boolean;
   isDealer: boolean;
   showdownCards?: GameState['showdownCardsP1'];
+  agentName?: string | null;
 }) {
   return (
     <div
@@ -61,7 +63,7 @@ function AgentPanel({
       <div className="text-center">
         <p className="text-xs text-slate-500 font-mono">{formatAddress(agent.address)}</p>
         <div className="mt-1">
-          <span className="text-xs text-slate-500">AI Agent</span>
+          <span className="text-xs text-slate-500">{agentName || 'AI Agent'}</span>
         </div>
       </div>
 
@@ -124,6 +126,7 @@ export function PokerTable({ game }: PokerTableProps) {
           isCurrentTurn={isPlayer1Turn}
           isDealer={isDealer1}
           showdownCards={game.showdownCardsP1}
+          agentName={game.player1Name}
         />
 
         {/* Center */}
@@ -142,6 +145,7 @@ export function PokerTable({ game }: PokerTableProps) {
           isCurrentTurn={isPlayer2Turn}
           isDealer={!isDealer1}
           showdownCards={game.showdownCardsP2}
+          agentName={game.player2Name}
         />
       </div>
 

@@ -28,6 +28,8 @@ export interface GameState {
   player2: AgentState;
   player1Key: PublicKey;
   player2Key: PublicKey;
+  player1Name: string | null;
+  player2Name: string | null;
   winner: PublicKey | null;
   bettingPoolPda: PublicKey;
   dealerPosition: number;
@@ -43,6 +45,8 @@ export interface GameSummary {
   handNumber: number;
   player1: PublicKey;
   player2: PublicKey;
+  player1Name: string | null;
+  player2Name: string | null;
   pot: number;
   winner: PublicKey | null;
   bettingPoolPda: PublicKey;

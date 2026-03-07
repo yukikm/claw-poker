@@ -84,6 +84,8 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         gameId: string;
         player1: string;
         player2: string;
+        player1Name: string | null;
+        player2Name: string | null;
         phase: string;
         handNumber: number;
         pot: number;
@@ -159,6 +161,8 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
             handNumber: game.handNumber.toNumber(),
             player1: game.player1,
             player2: game.player2,
+            player1Name: null,
+            player2Name: null,
             pot: game.pot.toNumber(),
             winner: game.winner,
             bettingPoolPda,
@@ -196,6 +200,8 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
           handNumber: sg.handNumber,
           player1: new PublicKey(sg.player1),
           player2: new PublicKey(sg.player2),
+          player1Name: sg.player1Name ?? null,
+          player2Name: sg.player2Name ?? null,
           pot: sg.pot,
           winner: sg.winner ? new PublicKey(sg.winner) : null,
           bettingPoolPda,

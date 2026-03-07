@@ -53,6 +53,8 @@ interface ActiveGame {
   gameId: bigint;
   player1Wallet: string;
   player2Wallet: string;
+  player1Name: string | null;
+  player2Name: string | null;
   entryFeeAmount: number;
 }
 
@@ -71,6 +73,8 @@ interface CompletedGame {
   gameId: string;
   player1Wallet: string;
   player2Wallet: string;
+  player1Name: string | null;
+  player2Name: string | null;
   finalState: DecodedGameState;
   completedAt: number;
 }
@@ -453,6 +457,8 @@ async function tryMatchPlayers(): Promise<void> {
       gameId,
       player1Wallet: player1Entry.walletAddress,
       player2Wallet: player2Entry.walletAddress,
+      player1Name: agentHandler.getAgentName(player1Entry.walletAddress),
+      player2Name: agentHandler.getAgentName(player2Entry.walletAddress),
       entryFeeAmount: Number(buyIn),
     });
 
@@ -1156,6 +1162,8 @@ async function handleGameComplete(
         gameId: gameIdStr,
         player1Wallet: game.player1Wallet,
         player2Wallet: game.player2Wallet,
+        player1Name: game.player1Name,
+        player2Name: game.player2Name,
         finalState: state,
         completedAt: Date.now(),
       });
@@ -1293,6 +1301,8 @@ app.get('/api/v1/games', (_req: express.Request, res: express.Response) => {
       gameId: gameIdStr,
       player1: game.player1Wallet,
       player2: game.player2Wallet,
+      player1Name: game.player1Name ?? null,
+      player2Name: game.player2Name ?? null,
       phase: state?.phase ?? 'Waiting',
       handNumber: state?.handNumber ?? 0,
       pot: state?.pot ?? 0,
@@ -1308,6 +1318,8 @@ app.get('/api/v1/games', (_req: express.Request, res: express.Response) => {
     gameId: cg.gameId,
     player1: cg.player1Wallet,
     player2: cg.player2Wallet,
+    player1Name: cg.player1Name ?? null,
+    player2Name: cg.player2Name ?? null,
     phase: cg.finalState.phase,
     handNumber: cg.finalState.handNumber,
     pot: cg.finalState.pot,
@@ -1340,6 +1352,8 @@ app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) 
       gameId: gameIdStr,
       player1: completed.player1Wallet,
       player2: completed.player2Wallet,
+      player1Name: completed.player1Name ?? null,
+      player2Name: completed.player2Name ?? null,
       phase: s.phase,
       handNumber: s.handNumber,
       pot: s.pot,
@@ -1373,6 +1387,8 @@ app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) 
       gameId: gameIdStr,
       player1: game.player1Wallet,
       player2: game.player2Wallet,
+      player1Name: game.player1Name ?? null,
+      player2Name: game.player2Name ?? null,
       phase: 'Waiting',
       handNumber: 0,
       pot: 0,
@@ -1399,6 +1415,8 @@ app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) 
     gameId: gameIdStr,
     player1: game.player1Wallet,
     player2: game.player2Wallet,
+    player1Name: game.player1Name ?? null,
+    player2Name: game.player2Name ?? null,
     phase: state.phase,
     handNumber: state.handNumber,
     pot: state.pot,

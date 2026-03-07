@@ -190,6 +190,8 @@ function mapGameAccount(
     },
     player1Key,
     player2Key,
+    player1Name: prevGame?.player1Name ?? null,
+    player2Name: prevGame?.player2Name ?? null,
     winner: (() => {
       const w = rawGame.winner as PublicKey | null;
       // Pubkey::default()（SystemProgram = 11111...1）はwinner未確定を示す
@@ -300,6 +302,7 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
         const data = await resp.json() as {
           phase: string; handNumber: number; pot: number;
           player1: string; player2: string;
+          player1Name: string | null; player2Name: string | null;
           player1ChipStack: number; player2ChipStack: number;
           player1Committed: number; player2Committed: number;
           player1HasFolded: boolean; player2HasFolded: boolean;
@@ -331,7 +334,9 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
           phase, handNumber: data.handNumber, pot: data.pot, currentTurn, boardCards,
           player1: { address: player1Key, chips: data.player1ChipStack, chipsCommitted: data.player1Committed, hasFolded: data.player1HasFolded, isAllIn: data.player1IsAllIn, lastAction: null },
           player2: { address: player2Key, chips: data.player2ChipStack, chipsCommitted: data.player2Committed, hasFolded: data.player2HasFolded, isAllIn: data.player2IsAllIn, lastAction: null },
-          player1Key, player2Key, winner: winnerKey, bettingPoolPda,
+          player1Key, player2Key,
+          player1Name: data.player1Name ?? null, player2Name: data.player2Name ?? null,
+          winner: winnerKey, bettingPoolPda,
           dealerPosition: data.dealerPosition, lastRaiseAmount: data.lastRaiseAmount,
           showdownCardsP1, showdownCardsP2,
         };
@@ -410,6 +415,8 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
               pot: number;
               player1: string;
               player2: string;
+              player1Name: string | null;
+              player2Name: string | null;
               player1ChipStack: number;
               player2ChipStack: number;
               player1Committed: number;
@@ -502,6 +509,8 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
                   },
                   player1Key,
                   player2Key,
+                  player1Name: data.player1Name ?? prevGame.player1Name,
+                  player2Name: data.player2Name ?? prevGame.player2Name,
                   winner: winnerKey,
                   dealerPosition: data.dealerPosition,
                   lastRaiseAmount: data.lastRaiseAmount,

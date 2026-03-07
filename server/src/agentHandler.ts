@@ -72,6 +72,7 @@ export class AgentHandler {
       ws,
       sessionId,
       walletAddress: null,
+      agentName: null,
       nonce,
       nonceExpiresAt: Date.now() + AUTH_NONCE_EXPIRY_SECONDS * 1000,
       token: null,
@@ -114,7 +115,7 @@ export class AgentHandler {
 
     switch (message.type) {
       case 'authenticate':
-        this.handleAuthenticate(sessionId, message.walletAddress, message.signature, message.nonce);
+        this.handleAuthenticate(sessionId, message.walletAddress, message.signature, message.nonce, message.agentName);
         break;
       case 'join_queue':
         this.handleJoinQueue(sessionId, message.token, message.entryFeeSignature, message.entryFeeAmount);
@@ -140,7 +141,7 @@ export class AgentHandler {
     this.onTeeAuthResponse?.(session.walletAddress, challenge, signature);
   }
 
-  handleAuthenticate(sessionId: string, walletAddress: string, signature: string, nonce: string): void {
+  handleAuthenticate(sessionId: string, walletAddress: string, signature: string, nonce: string, agentName?: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
@@ -202,6 +203,7 @@ export class AgentHandler {
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
 
     session.walletAddress = walletAddress;
+    session.agentName = agentName && agentName.trim() ? agentName.trim().slice(0, 32) : null;
     session.authenticated = true;
     session.token = token;
     session.tokenExpiresAt = expiresAt;
@@ -350,6 +352,13 @@ export class AgentHandler {
 
     const session = this.sessions.get(sessionId);
     return session !== undefined && session.ws.readyState === WebSocket.OPEN;
+  }
+
+  getAgentName(walletAddress: string): string | null {
+    const sessionId = this.walletToSession.get(walletAddress);
+    if (!sessionId) return null;
+    const session = this.sessions.get(sessionId);
+    return session?.agentName ?? null;
   }
 
   getConnectedAgentCount(): number {
