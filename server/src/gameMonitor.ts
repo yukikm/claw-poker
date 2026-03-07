@@ -472,6 +472,12 @@ export class GameMonitor {
       if (info) {
         const state = this.decodeGameAccount(info.data);
         if (state) {
+          // Finishedゲームはこれ以上ポーリング不要（unwatchGameで停止されるまでの安全弁）
+          if (state.phase === 'Finished') {
+            console.log(`[GameMonitor] forcePoll: game ${gameId} is Finished, skipping further polls`);
+            await sub.onUpdate(state);
+            return;
+          }
           sub.lastUpdateAt = Date.now();
           console.log(`[GameMonitor] forcePoll: game ${gameId} phase=${state.phase} hand=${state.handNumber} turn=${state.currentTurn.slice(0, 8)}...`);
           await sub.onUpdate(state);

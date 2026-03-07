@@ -1033,87 +1033,89 @@ async function handleGameComplete(
     actionTimeoutTimers.delete(gameIdStr);
   }
 
-  const winnerWallet = state.winner === player1Wallet ? player1Wallet : player2Wallet;
-  const winnerPosition = winnerWallet === player1Wallet ? 'player1' : 'player2';
-
-  // ER上の最終状態をL1にコミットしてからresolveGameを呼び出す
-  // commit_gameなしでresolveGameを呼ぶとER上の状態がL1に反映されないためゲームが解決できない
+  // クリーンアップは必ず実行する（commitやresolveが失敗しても監視は停止する）
+  // try/finally でラップし、FinishedゲームのforcePollが永久に走り続けるのを防ぐ
   try {
-    await anchorClient.commitGameCheckpoint(gameId);
-    console.log(`[GameComplete] Game ${gameIdStr}: committed final state to L1`);
-  } catch (err) {
-    console.error(`[GameComplete] Failed to commit game ${gameIdStr} to L1:`, err);
-    // コミット失敗時はresolveGameも続行不可のため早期リターン
-    return;
-  }
+    const winnerWallet = state.winner === player1Wallet ? player1Wallet : player2Wallet;
+    const winnerPosition = winnerWallet === player1Wallet ? 'player1' : 'player2';
 
-  // resolve_gameを呼び出してpayoutを処理
-  let payoutAmount = 0;
-  let payoutSignature = '';
-  let houseFee = 0;
-  try {
-    const winnerPubkey = new PublicKey(winnerWallet);
-    const result = await anchorClient.resolveGame(gameId, winnerPubkey);
-    payoutAmount = result.payout;
-    payoutSignature = result.signature;
-    houseFee = result.fee;
-  } catch (err) {
-    console.error(`[GameComplete] Failed to resolve game ${gameIdStr}:`, err);
-  }
-
-  // ゲーム終了理由を特定
-  // タイムアウト没収（3連続タイムアウト）、切断、通常の勝負を区別する
-  let gameEndReason: 'opponent_eliminated' | 'disconnect' | 'timeout_forfeit' = 'opponent_eliminated';
-  const p1TimeoutsForfeit = (state.consecutiveTimeoutsP1 ?? 0) >= 3;
-  const p2TimeoutsForfeit = (state.consecutiveTimeoutsP2 ?? 0) >= 3;
-  if (p1TimeoutsForfeit || p2TimeoutsForfeit) {
-    gameEndReason = 'timeout_forfeit';
-  } else {
-    const p1Connected = agentHandler.isAgentConnected(player1Wallet);
-    const p2Connected = agentHandler.isAgentConnected(player2Wallet);
-    if (!p1Connected || !p2Connected) {
-      gameEndReason = 'disconnect';
+    // ER上の最終状態をL1にコミットしてからresolveGameを呼び出す
+    // commit_gameなしでresolveGameを呼ぶとER上の状態がL1に反映されないためゲームが解決できない
+    try {
+      await anchorClient.commitGameCheckpoint(gameId);
+      console.log(`[GameComplete] Game ${gameIdStr}: committed final state to L1`);
+    } catch (err) {
+      console.error(`[GameComplete] Failed to commit game ${gameIdStr} to L1:`, err);
     }
-  }
 
-  // 両プレイヤーにゲーム終了通知
-  [player1Wallet, player2Wallet].forEach((wallet) => {
-    const isWinner = wallet === winnerWallet;
-    const myFinalStack = wallet === player1Wallet ? state.player1ChipStack : state.player2ChipStack;
-    const oppFinalStack = wallet === player1Wallet ? state.player2ChipStack : state.player1ChipStack;
+    // resolve_gameを呼び出してpayoutを処理
+    let payoutAmount = 0;
+    let payoutSignature = '';
+    let houseFee = 0;
+    try {
+      const winnerPubkey = new PublicKey(winnerWallet);
+      const result = await anchorClient.resolveGame(gameId, winnerPubkey);
+      payoutAmount = result.payout;
+      payoutSignature = result.signature;
+      houseFee = result.fee;
+    } catch (err) {
+      console.error(`[GameComplete] Failed to resolve game ${gameIdStr}:`, err);
+    }
 
-    agentHandler.sendToAgent(wallet, {
-      type: 'game_complete',
-      gameId: gameIdStr,
-      winner: winnerPosition,
-      isMe: isWinner,
-      finalMyStack: myFinalStack,
-      finalOpponentStack: oppFinalStack,
-      handsPlayed: state.handNumber,
-      payoutAmount: isWinner ? payoutAmount : 0,
-      payoutSignature: isWinner ? payoutSignature : '',
-      houseFee,
-      reason: gameEndReason,
+    // ゲーム終了理由を特定
+    // タイムアウト没収（3連続タイムアウト）、切断、通常の勝負を区別する
+    let gameEndReason: 'opponent_eliminated' | 'disconnect' | 'timeout_forfeit' = 'opponent_eliminated';
+    const p1TimeoutsForfeit = (state.consecutiveTimeoutsP1 ?? 0) >= 3;
+    const p2TimeoutsForfeit = (state.consecutiveTimeoutsP2 ?? 0) >= 3;
+    if (p1TimeoutsForfeit || p2TimeoutsForfeit) {
+      gameEndReason = 'timeout_forfeit';
+    } else {
+      const p1Connected = agentHandler.isAgentConnected(player1Wallet);
+      const p2Connected = agentHandler.isAgentConnected(player2Wallet);
+      if (!p1Connected || !p2Connected) {
+        gameEndReason = 'disconnect';
+      }
+    }
+
+    // 両プレイヤーにゲーム終了通知
+    [player1Wallet, player2Wallet].forEach((wallet) => {
+      const isWinner = wallet === winnerWallet;
+      const myFinalStack = wallet === player1Wallet ? state.player1ChipStack : state.player2ChipStack;
+      const oppFinalStack = wallet === player1Wallet ? state.player2ChipStack : state.player1ChipStack;
+
+      agentHandler.sendToAgent(wallet, {
+        type: 'game_complete',
+        gameId: gameIdStr,
+        winner: winnerPosition,
+        isMe: isWinner,
+        finalMyStack: myFinalStack,
+        finalOpponentStack: oppFinalStack,
+        handsPlayed: state.handNumber,
+        payoutAmount: isWinner ? payoutAmount : 0,
+        payoutSignature: isWinner ? payoutSignature : '',
+        houseFee,
+        reason: gameEndReason,
+      });
+
+      agentHandler.setAgentGameId(wallet, null);
     });
-
-    agentHandler.setAgentGameId(wallet, null);
-  });
-
-  // ゲーム監視停止・クリーンアップ
-  gameMonitor.unwatchGame(
-    gameIdStr,
-    anchorClient.getL1Connection(),
-    anchorClient.getERConnection(),
-  );
-  waitingCrankExecutedAtHand.delete(gameIdStr);
-  waitingCrankInFlight.delete(gameIdStr);
-  bettingEndCrankInFlight.delete(gameIdStr);
-  bettingEndCrankExecuted.delete(gameIdStr);
-  prevGameStates.delete(gameIdStr);
-  currentHandActions.delete(gameIdStr);
-  handStartChips.delete(gameIdStr);
-  capturedShowdownCards.delete(gameIdStr);
-  activeGames.delete(gameId);
+  } finally {
+    // ゲーム監視停止・クリーンアップ（commit/resolve失敗時も必ず実行）
+    gameMonitor.unwatchGame(
+      gameIdStr,
+      anchorClient.getL1Connection(),
+      anchorClient.getERConnection(),
+    );
+    waitingCrankExecutedAtHand.delete(gameIdStr);
+    waitingCrankInFlight.delete(gameIdStr);
+    bettingEndCrankInFlight.delete(gameIdStr);
+    bettingEndCrankExecuted.delete(gameIdStr);
+    prevGameStates.delete(gameIdStr);
+    currentHandActions.delete(gameIdStr);
+    handStartChips.delete(gameIdStr);
+    capturedShowdownCards.delete(gameIdStr);
+    activeGames.delete(gameId);
+  }
 }
 
 // ─── Express HTTPサーバー（x402エントリーポイント）────────────────────────────
