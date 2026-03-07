@@ -30,7 +30,7 @@ export function useBettingPool(bettingPoolPda: PublicKey | null) {
     connection.getAccountInfo(bettingPoolPda).then((accountInfo) => {
       if (!accountInfo) return;
       try {
-        const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(accountInfo.data)) as Record<string, unknown>;
+        const rawPool = program.coder.accounts.decode('bettingPool', Buffer.from(accountInfo.data)) as Record<string, unknown>;
         setPool(decodeRawPool(rawPool));
       } catch (err) { console.error('[useBettingPool] Initial BettingPool decode error:', err); }
     }).catch((err) => console.error('[useBettingPool] Initial fetch error:', err));
@@ -39,7 +39,7 @@ export function useBettingPool(bettingPoolPda: PublicKey | null) {
       bettingPoolPda,
       (accountInfo) => {
         try {
-          const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(accountInfo.data)) as Record<string, unknown>;
+          const rawPool = program.coder.accounts.decode('bettingPool', Buffer.from(accountInfo.data)) as Record<string, unknown>;
           setPool(decodeRawPool(rawPool));
         } catch (err) { console.error('[useBettingPool] BettingPool decode error:', err); }
       },

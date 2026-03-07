@@ -41,18 +41,17 @@ export function WalletButton() {
   if (connected && publicKey) {
     return (
       <div className="flex items-center gap-2">
-        <div className="glass rounded-lg px-3 py-2 text-sm">
-          <span className="text-slate-400 text-xs">Connected</span>
-          <p className="text-cyan-400 font-mono">{formatAddress(publicKey)}</p>
+        <div className="glass rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-xs">
+          <span className="text-cyan-400 font-mono">{formatAddress(publicKey)}</span>
           {balance !== null && (
-            <p className="text-slate-300 text-xs font-mono">
+            <span className="text-slate-400 font-mono">
               {(balance / LAMPORTS_PER_SOL).toFixed(3)} SOL
-            </p>
+            </span>
           )}
         </div>
         <button
           onClick={disconnect}
-          className="glass rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white hover:border-red-500/30 transition-colors cursor-pointer"
+          className="glass rounded-lg px-2.5 py-1.5 text-xs text-slate-400 hover:text-white hover:border-red-500/30 transition-colors cursor-pointer"
           aria-label="Disconnect wallet"
         >
           Disconnect

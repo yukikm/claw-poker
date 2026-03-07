@@ -254,7 +254,7 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
     const handleGameAccountChange = (accountInfo: import('@solana/web3.js').AccountInfo<Buffer>): void => {
       try {
         const prevGame = get().game;
-        const rawGame = program.coder.accounts.decode('Game', Buffer.from(accountInfo.data));
+        const rawGame = program.coder.accounts.decode('game', Buffer.from(accountInfo.data));
         set({ game: mapGameAccount(rawGame as Record<string, unknown>, gamePda, programId, prevGame) });
       } catch (err) { console.error('[watchGameStore] Game decode error:', err); }
     };
@@ -269,7 +269,7 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
       bettingPoolPda,
       (accountInfo) => {
         try {
-          const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(accountInfo.data));
+          const rawPool = program.coder.accounts.decode('bettingPool', Buffer.from(accountInfo.data));
           const pool = mapBettingPoolAccount(rawPool as Record<string, unknown>);
           syncBets(pool);
           set({ bettingPool: pool });
@@ -348,7 +348,7 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
 
       if (gameInfo) {
         try {
-          const rawGame = program.coder.accounts.decode('Game', Buffer.from(gameInfo.data));
+          const rawGame = program.coder.accounts.decode('game', Buffer.from(gameInfo.data));
           gameState = mapGameAccount(rawGame as Record<string, unknown>, gamePda, programId, null);
           set({ game: gameState });
         } catch (err) { console.error('[watchGameStore] Initial Game decode error:', err); }
@@ -381,7 +381,7 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
 
       if (poolInfo) {
         try {
-          const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(poolInfo.data));
+          const rawPool = program.coder.accounts.decode('bettingPool', Buffer.from(poolInfo.data));
           const pool = mapBettingPoolAccount(rawPool as Record<string, unknown>);
           if (pool.winner && gameState) {
             useMyBetsStore.getState().syncBetsWithPool(
