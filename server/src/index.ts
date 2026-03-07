@@ -1071,27 +1071,44 @@ async function handleGameComplete(
     const winnerWallet = state.winner === player1Wallet ? player1Wallet : player2Wallet;
     const winnerPosition = winnerWallet === player1Wallet ? 'player1' : 'player2';
 
-    // ER上の最終状態をL1にコミットしてからresolveGameを呼び出す
-    // commit_gameなしでresolveGameを呼ぶとER上の状態がL1に反映されないためゲームが解決できない
+    // ER上の最終状態をL1にコミット+undelegate してからresolveGameを呼び出す
+    // player pubkeysを直接渡してTEE読み取りエラーを回避する
+    let commitSucceeded = false;
     try {
-      await anchorClient.commitGameCheckpoint(gameId);
+      await anchorClient.commitGameCheckpoint(
+        gameId,
+        new PublicKey(player1Wallet),
+        new PublicKey(player2Wallet),
+      );
+      commitSucceeded = true;
       console.log(`[GameComplete] Game ${gameIdStr}: committed final state to L1`);
     } catch (err) {
       console.error(`[GameComplete] Failed to commit game ${gameIdStr} to L1:`, err);
     }
 
     // resolve_gameを呼び出してpayoutを処理
+    // commit_game (Finished) はcommit_and_undelegateを実行するため、
+    // L1にアカウントが戻るまで待つ必要がある
     let payoutAmount = 0;
     let payoutSignature = '';
     let houseFee = 0;
-    try {
-      const winnerPubkey = new PublicKey(winnerWallet);
-      const result = await anchorClient.resolveGame(gameId, winnerPubkey);
-      payoutAmount = result.payout;
-      payoutSignature = result.signature;
-      houseFee = result.fee;
-    } catch (err) {
-      console.error(`[GameComplete] Failed to resolve game ${gameIdStr}:`, err);
+    if (commitSucceeded) {
+      try {
+        const undelegated = await anchorClient.waitForUndelegation(gameId);
+        if (!undelegated) {
+          console.error(`[GameComplete] Game ${gameIdStr}: undelegation timed out, skipping resolve`);
+        } else {
+          const winnerPubkey = new PublicKey(winnerWallet);
+          const result = await anchorClient.resolveGame(gameId, winnerPubkey);
+          payoutAmount = result.payout;
+          payoutSignature = result.signature;
+          houseFee = result.fee;
+        }
+      } catch (err) {
+        console.error(`[GameComplete] Failed to resolve game ${gameIdStr}:`, err);
+      }
+    } else {
+      console.warn(`[GameComplete] Game ${gameIdStr}: commit failed, skipping resolve (funds remain in vault)`);
     }
 
     // ゲーム終了理由を特定

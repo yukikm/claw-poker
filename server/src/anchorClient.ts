@@ -1332,32 +1332,46 @@ export class AnchorClient {
   // ─── チェックポイントコミット ──────────────────────────────────────────────
 
   /**
-   * 50ハンドチェックポイントでER上の状態をL1にコミットする。
-   * commit_game命令をphase==Waitingの状態で呼び出す（中間チェックポイント）。
+   * ER上の状態をL1にコミットする。
+   * phase==Finished時はcommit_and_undelegate（L1に戻す）、phase==Waiting時は中間チェックポイント。
+   *
+   * player1/player2はPDA導出に必要。呼び出し元が既知の場合は直接渡すことでTEE読み取りを回避する。
    */
-  async commitGameCheckpoint(gameId: bigint): Promise<string> {
+  async commitGameCheckpoint(
+    gameId: bigint,
+    player1Override?: PublicKey,
+    player2Override?: PublicKey,
+  ): Promise<string> {
     const [gamePda] = this.deriveGamePda(gameId);
     const operatorPubkey = this.operatorKeypair.publicKey;
 
-    // プライベートER（TEE）からGameアカウントを読み取る。公開ERにはアカウントがない。
-    const readConn = await this.getReadConnection();
-    if (!readConn) {
-      throw new Error(`TEE connection unavailable for commitGameCheckpoint gameId ${gameId}`);
-    }
-    const gameAccount = await readConn.getAccountInfo(gamePda, 'confirmed');
-    if (!gameAccount || gameAccount.data.length < 8) {
-      throw new Error(`Game account not found or not initialized for gameId ${gameId}`);
-    }
+    let player1: PublicKey;
+    let player2: PublicKey;
 
-    // M-x402-2と同様にIDLのcoder.accounts.decodeで動的にデコードし、バイナリオフセットのハードコードを排除
-    let decodedGame: { player1: PublicKey; player2: PublicKey };
-    try {
-      decodedGame = this.erProgram.coder.accounts.decode('Game', gameAccount.data) as typeof decodedGame;
-    } catch {
-      throw new Error(`Game account for gameId ${gameId} exists but is not decodable (discriminator mismatch or not initialized)`);
+    if (player1Override && player2Override) {
+      // 呼び出し元がプレイヤー公開鍵を提供（TEE読み取り不要）
+      player1 = player1Override;
+      player2 = player2Override;
+    } else {
+      // フォールバック: TEEから読み取る（中間チェックポイント等）
+      const readConn = await this.getReadConnection();
+      if (!readConn) {
+        throw new Error(`TEE connection unavailable for commitGameCheckpoint gameId ${gameId}`);
+      }
+      const gameAccount = await readConn.getAccountInfo(gamePda, 'confirmed');
+      if (!gameAccount || gameAccount.data.length < 8) {
+        throw new Error(`Game account not found or not initialized for gameId ${gameId}`);
+      }
+
+      let decodedGame: { player1: PublicKey; player2: PublicKey };
+      try {
+        decodedGame = this.erProgram.coder.accounts.decode('Game', gameAccount.data) as typeof decodedGame;
+      } catch {
+        throw new Error(`Game account for gameId ${gameId} exists but is not decodable (discriminator mismatch or not initialized)`);
+      }
+      player1 = decodedGame.player1;
+      player2 = decodedGame.player2;
     }
-    const player1 = decodedGame.player1;
-    const player2 = decodedGame.player2;
 
     const [player1StatePda] = this.derivePlayerStatePda(gameId, player1);
     const [player2StatePda] = this.derivePlayerStatePda(gameId, player2);
@@ -1798,6 +1812,39 @@ export class AnchorClient {
       }
     }
     return null;
+  }
+
+  // ─── undelegation待ち ──────────────────────────────────────────────────────
+
+  /**
+   * L1上でGameアカウントのオーナーがpokerプログラムに戻る（undelegate完了）まで待つ。
+   * commit_and_undelegate後、L1への伝播に数秒かかるため、resolveGame前に呼び出す。
+   */
+  async waitForUndelegation(gameId: bigint, maxWaitMs = 30_000, intervalMs = 2_000): Promise<boolean> {
+    const [gamePda] = this.deriveGamePda(gameId);
+    const start = Date.now();
+
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const accountInfo = await this.l1Connection.getAccountInfo(gamePda, 'confirmed');
+        if (accountInfo) {
+          const owner = accountInfo.owner.toBase58();
+          if (owner === PROGRAM_ID.toBase58()) {
+            console.log(`[AnchorClient] Game ${gameId} undelegated to L1 (owner=${owner})`);
+            return true;
+          }
+          console.log(`[AnchorClient] Game ${gameId} still delegated (owner=${owner}), waiting...`);
+        } else {
+          console.log(`[AnchorClient] Game ${gameId} not found on L1, waiting...`);
+        }
+      } catch (err) {
+        console.warn(`[AnchorClient] Error checking undelegation for game ${gameId}:`, err);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    console.error(`[AnchorClient] Game ${gameId} undelegation timed out after ${maxWaitMs}ms`);
+    return false;
   }
 
   // ─── ゲーム解決（resolve_game） ─────────────────────────────────────────────
