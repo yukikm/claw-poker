@@ -1018,6 +1018,8 @@ function calculateValidActions(state: DecodedGameState, isPlayer1: boolean): str
   return actions;
 }
 
+const gameCompleteInFlight = new Set<string>();
+
 async function handleGameComplete(
   gameId: bigint,
   state: DecodedGameState,
@@ -1025,6 +1027,13 @@ async function handleGameComplete(
   player2Wallet: string,
 ): Promise<void> {
   const gameIdStr = gameId.toString();
+
+  // 二重実行ガード（forcePollの重複で同一ゲームが複数回Finishedとして届くケース）
+  if (gameCompleteInFlight.has(gameIdStr)) {
+    console.log(`[GameComplete] Already processing game ${gameIdStr}, skipping duplicate`);
+    return;
+  }
+  gameCompleteInFlight.add(gameIdStr);
 
   // タイムアウトタイマーをクリーンアップ
   const gameTimer = actionTimeoutTimers.get(gameIdStr);
@@ -1115,6 +1124,7 @@ async function handleGameComplete(
     handStartChips.delete(gameIdStr);
     capturedShowdownCards.delete(gameIdStr);
     activeGames.delete(gameId);
+    gameCompleteInFlight.delete(gameIdStr);
   }
 }
 
