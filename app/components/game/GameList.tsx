@@ -33,7 +33,18 @@ export function GameList({ filter = 'all', limit }: GameListProps) {
     return true;
   });
 
-  const displayGames = limit ? filteredGames.slice(0, limit) : filteredGames;
+  // ソート: In Progress > Finished > Stale(Waiting+Hand#0) の順に表示
+  const sortedGames = [...filteredGames].sort((a, b) => {
+    const priority = (g: typeof a) => {
+      if (IN_PROGRESS_PHASES.includes(g.phase)) return 0;
+      if (g.phase === 'Finished') return 1;
+      if (g.phase === 'Waiting' && g.handNumber === 0) return 3;
+      return 2;
+    };
+    return priority(a) - priority(b);
+  });
+
+  const displayGames = limit ? sortedGames.slice(0, limit) : sortedGames;
 
   if (isLoading) {
     return (
