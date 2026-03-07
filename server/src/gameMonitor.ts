@@ -268,11 +268,14 @@ export class GameMonitor {
       offset += 8;
 
       // showdown_cards_p1 (2 bytes)
+      // Showdown/Finished以外ではreveal_showdown_cardsが実行されていないため、
+      // バイト値は初期値([0,0]または[255,255])のまま。phaseで判定する。
       const sdCard1P1 = data.readUInt8(offset);
       const sdCard2P1 = data.readUInt8(offset + 1);
       offset += 2;
+      const isShowdownPhase = phase === 'Showdown' || phase === 'Finished';
       const showdownCardsP1: [string, string] | null =
-        sdCard1P1 !== CARD_UNKNOWN && sdCard2P1 !== CARD_UNKNOWN
+        isShowdownPhase && sdCard1P1 !== CARD_UNKNOWN && sdCard2P1 !== CARD_UNKNOWN
           ? [decodeCard(sdCard1P1), decodeCard(sdCard2P1)]
           : null;
 
@@ -281,7 +284,7 @@ export class GameMonitor {
       const sdCard2P2 = data.readUInt8(offset + 1);
       offset += 2;
       const showdownCardsP2: [string, string] | null =
-        sdCard1P2 !== CARD_UNKNOWN && sdCard2P2 !== CARD_UNKNOWN
+        isShowdownPhase && sdCard1P2 !== CARD_UNKNOWN && sdCard2P2 !== CARD_UNKNOWN
           ? [decodeCard(sdCard1P2), decodeCard(sdCard2P2)]
           : null;
 

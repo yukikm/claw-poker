@@ -90,6 +90,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         player1ChipStack: number;
         player2ChipStack: number;
         bettingClosed: boolean;
+        winner: string | null;
       }
       const serverGamesPromise: Promise<ServerGame[]> = fetch(`${SERVER_API_URL}/api/v1/games`)
         .then((r) => {
@@ -196,7 +197,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
           player1: new PublicKey(sg.player1),
           player2: new PublicKey(sg.player2),
           pot: sg.pot,
-          winner: null,
+          winner: sg.winner ? new PublicKey(sg.winner) : null,
           bettingPoolPda,
           isBettable,
           bettingClosed: sg.bettingClosed,

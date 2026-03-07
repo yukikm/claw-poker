@@ -66,6 +66,17 @@ const actionTimeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** gameId(string) → 前回のDecodedGameState（フェーズ変化検知・アクション通知用） */
 const prevGameStates = new Map<string, DecodedGameState>();
 
+/** 完了ゲームの履歴（30分間保持。フロントエンドの "Completed" タブに表示するため） */
+interface CompletedGame {
+  gameId: string;
+  player1Wallet: string;
+  player2Wallet: string;
+  finalState: DecodedGameState;
+  completedAt: number;
+}
+const completedGames = new Map<string, CompletedGame>();
+const COMPLETED_GAME_TTL_MS = 30 * 60 * 1000; // 30分
+
 /** 現在のハンド内のアクション履歴（gameId → アクション配列） */
 const currentHandActions = new Map<string, HandHistoryEntry[]>();
 
@@ -1121,6 +1132,24 @@ async function handleGameComplete(
       agentHandler.setAgentGameId(wallet, null);
     });
   } finally {
+    // 完了ゲームを履歴に保存（フロントエンド "Completed" タブ用）
+    const game = activeGames.get(gameId);
+    if (game) {
+      completedGames.set(gameIdStr, {
+        gameId: gameIdStr,
+        player1Wallet: game.player1Wallet,
+        player2Wallet: game.player2Wallet,
+        finalState: state,
+        completedAt: Date.now(),
+      });
+    }
+
+    // 古い完了ゲームをTTLで削除
+    const now = Date.now();
+    for (const [id, cg] of completedGames) {
+      if (now - cg.completedAt > COMPLETED_GAME_TTL_MS) completedGames.delete(id);
+    }
+
     // ゲーム監視停止・クリーンアップ（commit/resolve失敗時も必ず実行）
     gameMonitor.unwatchGame(
       gameIdStr,
@@ -1240,7 +1269,7 @@ app.post('/api/v1/admin/queue/clear', async (_req: express.Request, res: express
 // フロントエンドが直接取得できない。サーバーのactiveGames + prevGameStatesから返す。
 app.get('/api/v1/games', (_req: express.Request, res: express.Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  const games = Array.from(activeGames.values()).map((game) => {
+  const activeList = Array.from(activeGames.values()).map((game) => {
     const gameIdStr = game.gameId.toString();
     const state = prevGameStates.get(gameIdStr);
     return {
@@ -1253,9 +1282,25 @@ app.get('/api/v1/games', (_req: express.Request, res: express.Response) => {
       player1ChipStack: state?.player1ChipStack ?? 1000,
       player2ChipStack: state?.player2ChipStack ?? 1000,
       bettingClosed: state?.bettingClosed ?? false,
+      winner: state?.winner ?? null,
     };
   });
-  res.json({ games });
+
+  // 完了ゲームも含める
+  const completedList = Array.from(completedGames.values()).map((cg) => ({
+    gameId: cg.gameId,
+    player1: cg.player1Wallet,
+    player2: cg.player2Wallet,
+    phase: cg.finalState.phase,
+    handNumber: cg.finalState.handNumber,
+    pot: cg.finalState.pot,
+    player1ChipStack: cg.finalState.player1ChipStack,
+    player2ChipStack: cg.finalState.player2ChipStack,
+    bettingClosed: cg.finalState.bettingClosed,
+    winner: cg.finalState.winner,
+  }));
+
+  res.json({ games: [...activeList, ...completedList] });
 });
 
 // ─── GET /api/v1/games/:gameId ──────────────────────────────────────────────
@@ -1269,6 +1314,38 @@ app.get('/api/v1/games/:gameId', (_req: express.Request, res: express.Response) 
   }
   const state = prevGameStates.get(gameIdStr);
   const game = Array.from(activeGames.values()).find((g) => g.gameId.toString() === gameIdStr);
+
+  // 完了ゲームの場合
+  const completed = completedGames.get(gameIdStr);
+  if (!game && completed) {
+    const s = completed.finalState;
+    res.json({
+      gameId: gameIdStr,
+      player1: completed.player1Wallet,
+      player2: completed.player2Wallet,
+      phase: s.phase,
+      handNumber: s.handNumber,
+      pot: s.pot,
+      player1ChipStack: s.player1ChipStack,
+      player2ChipStack: s.player2ChipStack,
+      boardCards: s.boardCards,
+      currentTurn: s.currentTurn,
+      player1Committed: s.player1Committed,
+      player2Committed: s.player2Committed,
+      player1HasFolded: s.player1HasFolded,
+      player2HasFolded: s.player2HasFolded,
+      player1IsAllIn: s.player1IsAllIn,
+      player2IsAllIn: s.player2IsAllIn,
+      bettingClosed: s.bettingClosed,
+      dealerPosition: s.dealerPosition,
+      lastRaiseAmount: s.lastRaiseAmount,
+      showdownCardsP1: s.showdownCardsP1,
+      showdownCardsP2: s.showdownCardsP2,
+      winner: s.winner,
+    });
+    return;
+  }
+
   if (!game) {
     res.status(404).json({ error: 'Game not found' });
     return;

@@ -38,7 +38,15 @@ export function CommunityCards({ cards, phase }: CommunityCardsProps) {
     Waiting: 0, Shuffling: 0, PreFlop: 0, Flop: 3, Turn: 4, River: 5, Showdown: 5, Finished: 5,
   }[phase] ?? 0;
 
-  const displayCards = cards.slice(0, 5).map((card, i) =>
+  // Waiting/Shuffling ではカードスロットを表示しない
+  const showSlots = phase !== 'Waiting' && phase !== 'Shuffling';
+  if (!showSlots) return null;
+
+  // 常に5枚分のスロットを確保し、フェーズに応じて表/裏を決定
+  const padded: CardDisplay[] = Array.from({ length: 5 }, (_, i) =>
+    cards[i] ?? { suit: 'Spades' as const, rank: 0, isUnknown: true }
+  );
+  const displayCards = padded.map((card, i) =>
     i < visibleCount ? card : { suit: 'Spades' as const, rank: 0, isUnknown: true }
   );
 

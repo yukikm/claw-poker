@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { type GameSummary } from '@/lib/types';
 import { GameStatusBadge } from './GameStatusBadge';
 import { AgentInfo } from './AgentInfo';
+import { formatAddress } from '@/lib/format';
 
 interface GameCardProps {
   game: GameSummary;
@@ -9,6 +10,7 @@ interface GameCardProps {
 
 export function GameCard({ game }: GameCardProps) {
   const isStale = game.phase === 'Waiting' && game.handNumber === 0;
+  const isFinished = game.phase === 'Finished';
 
   const content = (
     <>
@@ -39,10 +41,19 @@ export function GameCard({ game }: GameCardProps) {
         <AgentInfo address={game.player2} label="Player 2" colorClass="text-purple-300" />
       </div>
 
+      {isFinished && game.winner && (
+        <div className="flex items-center gap-2 mb-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+          <span className="text-yellow-400 text-sm">Winner:</span>
+          <span className="text-yellow-300 text-xs font-mono">{formatAddress(game.winner)}</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between text-xs text-slate-500">
         <span>Hand #{game.handNumber}</span>
         {isStale ? (
           <span className="text-yellow-500/60">Inactive</span>
+        ) : isFinished ? (
+          <span className="text-slate-400">View Result →</span>
         ) : (
           <span className="text-cyan-400 group-hover:text-white transition-colors">Watch →</span>
         )}
