@@ -167,10 +167,11 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         }
       );
 
-      // サーバーAPIのプライベートERゲームをマージ（ER/L1に存在しないゲームのみ追加）
-      const existingGameIds = new Set(games.map((g) => g.gameId.toString()));
+      // サーバーAPIのプライベートERゲームをマージ
+      // Private ER (TEE) にdelegateされたゲームはER/L1上のデータが古い（phase=Waiting等）ため、
+      // サーバーAPIのデータで上書きする。存在しないゲームは新規追加。
+      const existingGameIdxMap = new Map(games.map((g, idx) => [g.gameId.toString(), idx]));
       for (const sg of serverGames) {
-        if (existingGameIds.has(sg.gameId)) continue;
         const gameIdBigInt = BigInt(sg.gameId);
         const phaseMap: Record<string, GamePhase> = {
           Waiting: 'Waiting', Shuffling: 'Shuffling', PreFlop: 'PreFlop',
@@ -187,7 +188,7 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
         );
         const isBettable = !sg.bettingClosed
           && (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn' || phase === 'River');
-        games.push({
+        const serverEntry: GameSummary = {
           gameId: gameIdBigInt,
           gamePda,
           phase,
@@ -199,7 +200,14 @@ export const useGamesStore = create<GamesStore>((set, get) => ({
           bettingPoolPda,
           isBettable,
           bettingClosed: sg.bettingClosed,
-        });
+        };
+        const existingIdx = existingGameIdxMap.get(sg.gameId);
+        if (existingIdx !== undefined) {
+          // サーバーAPIのデータで上書き（TEE上の最新状態を反映）
+          games[existingIdx] = { ...games[existingIdx], ...serverEntry };
+        } else {
+          games.push(serverEntry);
+        }
       }
 
       // Compute aggregate statistics
