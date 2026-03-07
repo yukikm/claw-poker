@@ -286,12 +286,64 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
       ],
     });
 
+    // gameIdをPDAから逆算（ポーリングURL用）
+    // PDA seeds = [b'game', gameIdBuffer] なので直接は取れない。
+    // ページURLのgameIdStrを使うため、gamePdaからではなくサーバーAPI一覧から特定する。
+
+    const SERVER_API_URL = process.env.NEXT_PUBLIC_SERVER_API_URL ?? 'http://43.206.193.46:3001';
+
+    /** サーバーAPIからゲーム初期データを取得し GameState を構築する */
+    const fetchFromServerApi = async (gIdStr: string): Promise<GameState | null> => {
+      try {
+        const resp = await fetch(`${SERVER_API_URL}/api/v1/games/${gIdStr}`);
+        if (!resp.ok) return null;
+        const data = await resp.json() as {
+          phase: string; handNumber: number; pot: number;
+          player1: string; player2: string;
+          player1ChipStack: number; player2ChipStack: number;
+          player1Committed: number; player2Committed: number;
+          player1HasFolded: boolean; player2HasFolded: boolean;
+          player1IsAllIn: boolean; player2IsAllIn: boolean;
+          boardCards: string[]; currentTurn: string;
+          dealerPosition: number; lastRaiseAmount: number;
+          showdownCardsP1: [string, string] | null;
+          showdownCardsP2: [string, string] | null;
+          winner: string | null; bettingClosed: boolean;
+        };
+        const DEFAULT_PUBKEY = '11111111111111111111111111111111';
+        const player1Key = new PublicKey(data.player1);
+        const player2Key = new PublicKey(data.player2);
+        const currentTurnStr = data.currentTurn ?? DEFAULT_PUBKEY;
+        const currentTurn: 0 | 1 | 2 = currentTurnStr === DEFAULT_PUBKEY
+          ? 0 : (currentTurnStr === data.player1 ? 1 : 2);
+        const serverPhaseMap: Record<string, GamePhase> = {
+          Waiting: 'Waiting', Shuffling: 'Shuffling', PreFlop: 'PreFlop',
+          Flop: 'Flop', Turn: 'Turn', River: 'River', Showdown: 'Showdown', Finished: 'Finished',
+        };
+        const phase = serverPhaseMap[data.phase] ?? 'Waiting';
+        const boardCards = (data.boardCards ?? []).map(parseServerCard);
+        const showdownCardsP1 = data.showdownCardsP1 ? data.showdownCardsP1.map(parseServerCard) : [];
+        const showdownCardsP2 = data.showdownCardsP2 ? data.showdownCardsP2.map(parseServerCard) : [];
+        const winnerKey = data.winner && data.winner !== DEFAULT_PUBKEY ? new PublicKey(data.winner) : null;
+        return {
+          gameId: BigInt(gIdStr),
+          gamePda,
+          phase, handNumber: data.handNumber, pot: data.pot, currentTurn, boardCards,
+          player1: { address: player1Key, chips: data.player1ChipStack, chipsCommitted: data.player1Committed, hasFolded: data.player1HasFolded, isAllIn: data.player1IsAllIn, lastAction: null },
+          player2: { address: player2Key, chips: data.player2ChipStack, chipsCommitted: data.player2Committed, hasFolded: data.player2HasFolded, isAllIn: data.player2IsAllIn, lastAction: null },
+          player1Key, player2Key, winner: winnerKey, bettingPoolPda,
+          dealerPosition: data.dealerPosition, lastRaiseAmount: data.lastRaiseAmount,
+          showdownCardsP1, showdownCardsP2,
+        };
+      } catch { return null; }
+    };
+
     // 初期状態を読み込み（Game + BettingPool のみ）
     // ER にアカウントがない場合（デリゲーション伝播遅延・L1 のみ存在）は L1 にフォールバック
     Promise.all([
       erConnection.getAccountInfo(gamePda).then((info) => info ?? connection.getAccountInfo(gamePda)),
       connection.getAccountInfo(bettingPoolPda),
-    ]).then(([gameInfo, poolInfo]) => {
+    ]).then(async ([gameInfo, poolInfo]) => {
       let gameState: GameState | null = null;
 
       if (gameInfo) {
@@ -301,6 +353,32 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
           set({ game: gameState });
         } catch (err) { console.error('[watchGameStore] Initial Game decode error:', err); }
       }
+
+      // オンチェーンから取得できなかった場合、サーバーAPIからフォールバック取得
+      // Private ER (TEE) にdelegateされたゲームはER/L1どちらからも直接読めないため
+      if (!gameState) {
+        // サーバーAPIのゲーム一覧からgamePdaに一致するゲームIDを探す
+        try {
+          const listResp = await fetch(`${SERVER_API_URL}/api/v1/games`);
+          if (listResp.ok) {
+            const listData = await listResp.json() as { games: Array<{ gameId: string; player1: string; player2: string }> };
+            // PDAを再導出して一致するgameIdを特定
+            for (const g of listData.games) {
+              const gId = BigInt(g.gameId);
+              const buf = gameIdToBuffer(gId);
+              const [derivedPda] = PublicKey.findProgramAddressSync([Buffer.from('game'), buf], programId);
+              if (derivedPda.equals(gamePda)) {
+                gameState = await fetchFromServerApi(g.gameId);
+                if (gameState) {
+                  set({ game: gameState });
+                }
+                break;
+              }
+            }
+          }
+        } catch (err) { console.error('[watchGameStore] Server API fallback error:', err); }
+      }
+
       if (poolInfo) {
         try {
           const rawPool = program.coder.accounts.decode('BettingPool', Buffer.from(poolInfo.data));
@@ -319,10 +397,9 @@ export const useWatchGameStore = create<WatchGameStore>((set, get) => ({
 
       set({ isLoading: false });
 
-      // サーバーAPIポーリング開始: ゲームIDが判明したらTEE上の最新状態を定期取得
+      // サーバーAPIポーリング開始: オンチェーン/サーバーAPIどちらかでゲームが見つかった場合
       if (gameState) {
         const gameIdStr = gameState.gameId.toString();
-        const SERVER_API_URL = process.env.NEXT_PUBLIC_SERVER_API_URL ?? 'http://43.206.193.46:3001';
         const timer = setInterval(async () => {
           try {
             const resp = await fetch(`${SERVER_API_URL}/api/v1/games/${gameIdStr}`);
