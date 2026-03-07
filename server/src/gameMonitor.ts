@@ -127,12 +127,11 @@ export class GameMonitor {
       console.log(`[GameMonitor] Watching game ${gameId} (L1 + public ER only, no TEE)`);
     }
 
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
-    if (teeConnection) {
-      pollTimer = setInterval(() => {
-        void this.forcePoll(gameId);
-      }, POLL_INTERVAL_MS);
-    }
+    // TEE接続の有無に関わらずポーリングを開始する。
+    // TEE接続がnullの場合でもforcePollがrefresherで接続を再取得する。
+    const pollTimer = setInterval(() => {
+      void this.forcePoll(gameId);
+    }, POLL_INTERVAL_MS);
 
     this.subscriptions.set(gameId, {
       l1Sub, erSub, teeSub, teeConn: teeConnection,
@@ -449,10 +448,25 @@ export class GameMonitor {
    */
   async forcePoll(gameId: string): Promise<void> {
     const sub = this.subscriptions.get(gameId);
-    if (!sub?.teeConn) {
-      console.warn(`[GameMonitor] forcePoll: no TEE connection for game ${gameId}`);
+    if (!sub) return;
+
+    // TEE接続がない場合はrefresherで再取得を試みる
+    if (!sub.teeConn && this.teeConnectionRefresher) {
+      try {
+        const newConn = await this.teeConnectionRefresher();
+        if (newConn) {
+          sub.teeConn = newConn;
+          console.log(`[GameMonitor] forcePoll: TEE connection refreshed for game ${gameId}`);
+        }
+      } catch {
+        // refresher failure is non-fatal, will retry on next poll
+      }
+    }
+
+    if (!sub.teeConn) {
       return;
     }
+
     try {
       const info = await sub.teeConn.getAccountInfo(sub.gamePda, 'confirmed');
       if (info) {
@@ -469,6 +483,8 @@ export class GameMonitor {
       }
     } catch (err) {
       console.error(`[GameMonitor] forcePoll failed for game ${gameId}:`, err);
+      // TEE接続エラー時は次回ポーリングで再取得を試みるため、接続をクリアする
+      sub.teeConn = undefined;
     }
   }
 

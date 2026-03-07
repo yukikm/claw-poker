@@ -344,7 +344,9 @@ agentHandler.setOnAction(async (walletAddress, gameIdStr, action, amount) => {
     }
 
     // アクション後の状態変化を即座に検知し、次のyour_turnやクランクをトリガーする
+    // TEEのトランザクション反映に少しラグがある場合があるため、即座+500ms後にリトライ
     await gameMonitor.forcePoll(gameIdStr);
+    setTimeout(() => { void gameMonitor.forcePoll(gameIdStr); }, 500);
   } catch (err) {
     console.error(`[Action] Failed to submit action for ${walletAddress} in game ${gameIdStr}:`, err);
     agentHandler.sendToAgent(walletAddress, {
@@ -645,6 +647,7 @@ async function onGameStateUpdate(
         waitingCrankExecutedAtHand.set(gameIdStr, state.handNumber);
         console.log(`[Crank] Game ${gameIdStr}: shuffle+deal complete, polling for PreFlop state`);
         await gameMonitor.forcePoll(gameIdStr);
+        setTimeout(() => { void gameMonitor.forcePoll(gameIdStr); }, 500);
       } catch (err) {
         console.error(`[Crank] Failed to start next hand for game ${gameIdStr}:`, err);
         prevGameStates.delete(gameIdStr);
