@@ -201,8 +201,17 @@ function mapGameAccount(
     bettingPoolPda,
     dealerPosition: rawGame.dealerPosition as number,
     lastRaiseAmount: toBN(rawGame.lastRaiseAmount),
-    showdownCardsP1: (rawGame.showdownCardsP1 as number[]).map(decodeCard),
-    showdownCardsP2: (rawGame.showdownCardsP2 as number[]).map(decodeCard),
+    showdownCardsP1: (() => {
+      const cards = (rawGame.showdownCardsP1 as number[]).map(decodeCard);
+      // Showdown/Finished以外、または全てunknown(255)や初期値(0,0)の場合はnull扱い
+      if (phase !== 'Showdown' && phase !== 'Finished') return cards.map(() => ({ suit: 'Spades' as const, rank: 0, isUnknown: true }));
+      return cards;
+    })(),
+    showdownCardsP2: (() => {
+      const cards = (rawGame.showdownCardsP2 as number[]).map(decodeCard);
+      if (phase !== 'Showdown' && phase !== 'Finished') return cards.map(() => ({ suit: 'Spades' as const, rank: 0, isUnknown: true }));
+      return cards;
+    })(),
   };
 }
 
