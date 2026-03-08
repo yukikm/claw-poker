@@ -202,15 +202,18 @@ function mapGameAccount(
     dealerPosition: rawGame.dealerPosition as number,
     lastRaiseAmount: toBN(rawGame.lastRaiseAmount),
     showdownCardsP1: (() => {
-      const cards = (rawGame.showdownCardsP1 as number[]).map(decodeCard);
-      // Showdown/Finished以外、または全てunknown(255)や初期値(0,0)の場合はnull扱い
-      if (phase !== 'Showdown' && phase !== 'Finished') return cards.map(() => ({ suit: 'Spades' as const, rank: 0, isUnknown: true }));
-      return cards;
+      const rawCards = rawGame.showdownCardsP1 as number[];
+      // Showdown/Finished以外は裏面表示
+      if (phase !== 'Showdown' && phase !== 'Finished') return [{ suit: 'Spades' as const, rank: 0, isUnknown: true }, { suit: 'Spades' as const, rank: 0, isUnknown: true }];
+      // [0,0]はinitialize_game初期値（未設定）→ パブリックER/L1からの古いデータなので前の値を保持
+      if (rawCards[0] === 0 && rawCards[1] === 0) return prevGame?.showdownCardsP1 ?? rawCards.map(decodeCard);
+      return rawCards.map(decodeCard);
     })(),
     showdownCardsP2: (() => {
-      const cards = (rawGame.showdownCardsP2 as number[]).map(decodeCard);
-      if (phase !== 'Showdown' && phase !== 'Finished') return cards.map(() => ({ suit: 'Spades' as const, rank: 0, isUnknown: true }));
-      return cards;
+      const rawCards = rawGame.showdownCardsP2 as number[];
+      if (phase !== 'Showdown' && phase !== 'Finished') return [{ suit: 'Spades' as const, rank: 0, isUnknown: true }, { suit: 'Spades' as const, rank: 0, isUnknown: true }];
+      if (rawCards[0] === 0 && rawCards[1] === 0) return prevGame?.showdownCardsP2 ?? rawCards.map(decodeCard);
+      return rawCards.map(decodeCard);
     })(),
   };
 }

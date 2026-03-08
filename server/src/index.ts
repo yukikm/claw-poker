@@ -734,8 +734,13 @@ async function onGameStateUpdate(
         // Showdown → reveal_showdown_cards → forcePoll(カード公開を配信) → settle_hand
         console.log(`[Crank] Game ${gameIdStr}: showdown, revealing cards`);
         await anchorClient.revealShowdownCards(gameId, p1, p2);
+        // TEEへの書き込み反映を待つ
+        await new Promise(resolve => setTimeout(resolve, 500));
         // settle_handがshowdown_cardsをクリアする前にフロントエンドへ配信
         await gameMonitor.forcePoll(gameIdStr);
+        // forcePoll後のshowdownカード値をログ出力（デバッグ用）
+        const showdownState = capturedShowdownCards.get(gameIdStr);
+        console.log(`[Crank] Game ${gameIdStr}: showdown cards captured: P1=${showdownState?.p1?.join(',') ?? 'null'} P2=${showdownState?.p2?.join(',') ?? 'null'}`);
         // フロントエンドがShowdownカードを表示する時間を確保
         await new Promise(resolve => setTimeout(resolve, 3000));
         console.log(`[Crank] Game ${gameIdStr}: settling hand after showdown`);
@@ -757,8 +762,11 @@ async function onGameStateUpdate(
         }
         // River + betting_closed → ショーダウンへ
         await anchorClient.revealShowdownCards(gameId, p1, p2);
+        await new Promise(resolve => setTimeout(resolve, 500));
         // settle_handがshowdown_cardsをクリアする前にフロントエンドへ配信
         await gameMonitor.forcePoll(gameIdStr);
+        const showdownStateAllIn = capturedShowdownCards.get(gameIdStr);
+        console.log(`[Crank] Game ${gameIdStr}: all-in showdown cards captured: P1=${showdownStateAllIn?.p1?.join(',') ?? 'null'} P2=${showdownStateAllIn?.p2?.join(',') ?? 'null'}`);
         await new Promise(resolve => setTimeout(resolve, 3000));
         await anchorClient.settleHand(gameId, p1, p2);
       } else {

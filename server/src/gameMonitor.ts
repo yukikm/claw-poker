@@ -276,6 +276,9 @@ export class GameMonitor {
       const sdCard2P1 = data.readUInt8(offset + 1);
       offset += 2;
       const isShowdownPhase = phase === 'Showdown' || phase === 'Finished';
+      if (isShowdownPhase) {
+        console.log(`[GameMonitor] Showdown raw bytes: P1=[${sdCard1P1},${sdCard2P1}] P2=[${data.readUInt8(offset)},${data.readUInt8(offset + 1)}] phase=${phase}`);
+      }
       const showdownCardsP1: [string, string] | null =
         isShowdownPhase && sdCard1P1 !== CARD_UNKNOWN && sdCard2P1 !== CARD_UNKNOWN
           ? [decodeCard(sdCard1P1), decodeCard(sdCard2P1)]
