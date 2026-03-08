@@ -400,26 +400,6 @@
           }
         },
         {
-          "name": "game",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  97,
-                  109,
-                  101
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "game_id"
-              }
-            ]
-          }
-        },
-        {
           "name": "operator",
           "signer": true
         }
@@ -1955,26 +1935,6 @@
           }
         },
         {
-          "name": "game",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  97,
-                  109,
-                  101
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "game_id"
-              }
-            ]
-          }
-        },
-        {
           "name": "bet_record",
           "writable": true,
           "pda": {
@@ -3204,6 +3164,13 @@
               "関連するゲームID"
             ],
             "type": "u64"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "オペレーター（initialize時にgame.operatorからコピー）"
+            ],
+            "type": "pubkey"
           },
           {
             "name": "total_bet_player1",

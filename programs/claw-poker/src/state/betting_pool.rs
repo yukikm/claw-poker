@@ -5,6 +5,8 @@ use anchor_lang::prelude::*;
 pub struct BettingPool {
     /// 関連するゲームID
     pub game_id: u64,
+    /// オペレーター（initialize時にgame.operatorからコピー）
+    pub operator: Pubkey,
     /// Player 1に賭けられた総額（lamports）
     pub total_bet_player1: u64,
     /// Player 2に賭けられた総額（lamports）

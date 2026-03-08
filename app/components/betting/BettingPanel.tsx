@@ -11,7 +11,7 @@ import { LAMPORTS_PER_SOL, MIN_BET_LAMPORTS, MAX_BET_LAMPORTS } from '@/lib/cons
 
 interface BettingPanelProps {
   gameId: bigint;
-  gamePda: PublicKey;
+  gamePda?: PublicKey;
   bettingPoolPda: PublicKey;
   pool: BettingPoolState | null;
   phase: string;
@@ -59,7 +59,6 @@ export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: B
   const handleBet = async () => {
     const sig = await placeBet({
       gameId,
-      gamePda,
       bettingPoolPda,
       playerChoice,
       amount: betLamports,

@@ -712,6 +712,17 @@ async function onGameStateUpdate(
       const p1 = new PublicKey(player1Wallet);
       const p2 = new PublicKey(player2Wallet);
 
+      // ハンド決着に向かうブランチではBettingPoolを締め切る
+      const shouldCloseBetting = hasFold || isShowdown || state.bettingClosed;
+      if (shouldCloseBetting) {
+        try {
+          await anchorClient.closeBettingPool(gameId);
+        } catch (closeErr) {
+          // already closed or other non-critical error — log and continue
+          console.warn(`[Crank] closeBettingPool failed for game ${gameIdStr} (may already be closed):`, closeErr);
+        }
+      }
+
       if (hasFold) {
         // Fold → settle_hand でハンド決着
         console.log(`[Crank] Game ${gameIdStr}: fold detected, settling hand`);
@@ -759,6 +770,15 @@ async function onGameStateUpdate(
       bettingEndCrankExecuted.set(gameIdStr, crankKey);
     } catch (err) {
       console.error(`[Crank] Failed betting-end crank for game ${gameIdStr} (phase=${state.phase}):`, err);
+      // Schedule retry after delay (TEE connection may recover)
+      const retryDelay = 5_000;
+      console.log(`[Crank] Will retry betting-end crank for game ${gameIdStr} in ${retryDelay / 1000}s`);
+      setTimeout(() => {
+        // forcePoll will re-trigger the crank on next state update
+        gameMonitor.forcePoll(gameIdStr).catch((pollErr: unknown) => {
+          console.error(`[Crank] Retry forcePoll failed for game ${gameIdStr}:`, pollErr);
+        });
+      }, retryDelay);
     } finally {
       bettingEndCrankInFlight.delete(gameIdStr);
     }
@@ -1285,6 +1305,76 @@ app.post('/api/v1/admin/queue/clear', async (_req: express.Request, res: express
   } catch (err) {
     console.error('[Admin] Queue clear failed:', err);
     res.status(500).json({ error: 'Failed to clear queue', details: String(err) });
+  }
+});
+
+// ─── POST /api/v1/admin/reset ────────────────────────────────────────────────
+// サーバーの全状態（キュー・ゲーム・タイマー）をまっさらにリセットする管理エンドポイント。
+app.post('/api/v1/admin/reset', async (_req: express.Request, res: express.Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const stats = {
+      queueCleared: matchmakingQueue.length,
+      activeGamesCleared: activeGames.size,
+      completedGamesCleared: completedGames.size,
+      timersCleared: actionTimeoutTimers.size,
+    };
+
+    // 1. オンチェーンキューをクリア
+    try {
+      const queueData = await anchorClient.fetchMatchmakingQueue();
+      for (const entry of queueData) {
+        if (entry) {
+          try {
+            await anchorClient.leaveMatchmakingQueue(new PublicKey(entry.player));
+          } catch (err) {
+            console.warn(`[Admin:Reset] Failed to remove ${entry.player} from on-chain queue:`, err);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Admin:Reset] Failed to fetch on-chain queue:', err);
+    }
+
+    // 2. メモリ上のキューをクリア
+    matchmakingQueue.length = 0;
+
+    // 3. アクションタイムアウトタイマーを全停止
+    for (const [, timer] of actionTimeoutTimers) {
+      clearTimeout(timer);
+    }
+    actionTimeoutTimers.clear();
+
+    // 4. GameMonitorの全ゲーム監視を停止
+    const l1Conn = anchorClient.getL1Connection();
+    const erConn = anchorClient.getERConnection();
+    for (const [gameId] of activeGames) {
+      const gidStr = gameId.toString();
+      try {
+        gameMonitor.unwatchGame(gidStr, l1Conn, erConn);
+      } catch (err) {
+        console.warn(`[Admin:Reset] Failed to unwatch game ${gidStr}:`, err);
+      }
+    }
+
+    // 5. 全メモリ状態をクリア
+    activeGames.clear();
+    completedGames.clear();
+    prevGameStates.clear();
+    currentHandActions.clear();
+    pendingActions.clear();
+    handStartChips.clear();
+    capturedShowdownCards.clear();
+    waitingCrankExecutedAtHand.clear();
+    waitingCrankInFlight.clear();
+    bettingEndCrankInFlight.clear();
+    bettingEndCrankExecuted.clear();
+
+    console.log(`[Admin:Reset] Server state fully reset:`, stats);
+    res.json({ success: true, ...stats });
+  } catch (err) {
+    console.error('[Admin:Reset] Reset failed:', err);
+    res.status(500).json({ error: 'Reset failed', details: String(err) });
   }
 });
 

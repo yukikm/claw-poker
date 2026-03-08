@@ -4,6 +4,7 @@ use crate::state::{BettingPool, Game};
 pub fn handler(ctx: Context<InitializeBettingPool>, game_id: u64) -> Result<()> {
     let pool = &mut ctx.accounts.betting_pool;
     pool.game_id = game_id;
+    pool.operator = ctx.accounts.game.operator;
     pool.total_bet_player1 = 0;
     pool.total_bet_player2 = 0;
     pool.is_closed = false;

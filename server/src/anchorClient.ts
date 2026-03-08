@@ -1119,6 +1119,31 @@ export class AnchorClient {
   }
 
   /**
+   * BettingPoolのis_closedをtrueに設定し、観戦者ベットを締め切る。
+   * AllIn発生時・Showdown突入時・ゲーム終了前に呼び出す。
+   * L1上で実行（BettingPoolはdelegateされないため）。
+   */
+  async closeBettingPool(gameId: bigint): Promise<string> {
+    const [bettingPoolPda] = this.deriveBettingPoolPda(gameId);
+    const operatorPubkey = this.operatorKeypair.publicKey;
+
+    const txSig = await (this.l1Program.methods as unknown as {
+      closeBettingPool: (gameId: BN) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      };
+    })
+      .closeBettingPool(new BN(gameId.toString()))
+      .accounts({
+        bettingPool: bettingPoolPda,
+        operator: operatorPubkey,
+      })
+      .rpc();
+
+    console.log(`[AnchorClient] BettingPool closed for game ${gameId}: ${txSig}`);
+    return txSig;
+  }
+
+  /**
    * 30秒アクションタイムアウト時にhandle_timeout命令を呼び出す。
    * ER上で実行し、タイムアウトしたプレイヤーのPlayerStateを更新する。
    */

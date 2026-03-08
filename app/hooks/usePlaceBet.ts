@@ -9,12 +9,9 @@ import { useMyBetsStore } from '@/stores/myBetsStore';
 import { type MyBet } from '@/lib/types';
 
 const ANCHOR_ERROR_MESSAGES: Record<number, string> = {
-  6000: 'Game has not started.',
-  6001: 'Betting is closed.',
-  6002: 'Insufficient balance.',
-  6003: 'Already placed a bet.',
-  6004: 'Invalid player selection.',
-  6005: 'Invalid bet amount.',
+  6003: 'Invalid action (bad player choice or amount).',
+  6005: 'Betting is closed.',
+  6011: 'Pot overflow.',
 };
 
 function sanitizeError(err: unknown): string {
@@ -49,7 +46,6 @@ function sanitizeError(err: unknown): string {
 
 interface PlaceBetParams {
   gameId: bigint;
-  gamePda: PublicKey;
   bettingPoolPda: PublicKey;
   playerChoice: 1 | 2;
   amount: number; // lamports
@@ -64,7 +60,7 @@ export function usePlaceBet() {
   const [error, setError] = useState<string | null>(null);
   const programId = getProgramId();
 
-  const placeBet = async ({ gameId, gamePda, bettingPoolPda, playerChoice, amount }: PlaceBetParams): Promise<string | null> => {
+  const placeBet = async ({ gameId, bettingPoolPda, playerChoice, amount }: PlaceBetParams): Promise<string | null> => {
     if (!publicKey || !program) {
       setError('Please connect your wallet');
       return null;
@@ -82,12 +78,15 @@ export function usePlaceBet() {
         [Buffer.from('bet_record'), gameIdBuffer, publicKey.toBuffer()],
         programId
       );
+      const [gamePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('game'), gameIdBuffer],
+        programId
+      );
 
       const txSig = await program.methods
         .placeSpectatorBet(new BN(gameId.toString()), playerChoice, new BN(amount))
         .accountsPartial({
           bettingPool: bettingPoolPda,
-          game: gamePda,
           betRecord: betRecordPda,
           bettor: publicKey,
           systemProgram: SystemProgram.programId,
@@ -110,6 +109,7 @@ export function usePlaceBet() {
       addBet(newBet);
       return txSig;
     } catch (err) {
+      console.error('[placeBet] Raw error:', err);
       setError(sanitizeError(err));
       return null;
     } finally {

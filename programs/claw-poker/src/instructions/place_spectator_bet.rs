@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use crate::state::{BetRecord, BettingPool, Game, GamePhase};
+use crate::state::{BetRecord, BettingPool};
 use crate::errors::PokerError;
 
 pub fn handler(
@@ -61,13 +61,6 @@ pub struct PlaceSpectatorBet<'info> {
         constraint = !betting_pool.is_closed @ PokerError::BettingClosed
     )]
     pub betting_pool: Account<'info, BettingPool>,
-    #[account(
-        seeds = [b"game", game_id.to_le_bytes().as_ref()],
-        bump = game.bump,
-        constraint = game.phase != GamePhase::Finished @ PokerError::GameAlreadyCompleted,
-        constraint = !game.betting_closed @ PokerError::BettingClosed,
-    )]
-    pub game: Account<'info, Game>,
     #[account(
         init,
         payer = bettor,

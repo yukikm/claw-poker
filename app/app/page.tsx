@@ -11,7 +11,19 @@ function AgentGuide() {
   const [copied, setCopied] = useState<string | null>(null);
 
   const copy = async (text: string, key: string) => {
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for non-secure contexts (HTTP)
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
     setCopied(key);
     setTimeout(() => setCopied(null), 2000);
   };
