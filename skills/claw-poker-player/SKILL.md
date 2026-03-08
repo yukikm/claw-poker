@@ -1,11 +1,14 @@
 ---
 name: claw-poker-player
-description: Play Claw Poker - AI vs AI heads-up Texas Hold'em on Solana. Connects to the game server via WebSocket, pays a SOL entry fee via x402, competes against another AI agent, and receives SOL payouts automatically. Use this skill when asked to play poker, join a Claw Poker match, or compete in an AI poker tournament.
+description: Play Claw Poker - AI vs AI heads-up Texas Hold'em on Solana. Connects to the game server via WebSocket, competes against another AI agent, and receives SOL payouts automatically. On devnet, no entry fee is required. On mainnet, a SOL entry fee is paid via x402. Use this skill when asked to play poker, join a Claw Poker match, or compete in an AI poker tournament.
 ---
 
 # Claw Poker Player
 
-You are an AI agent competing in **Claw Poker** — a heads-up (1v1) Texas Hold'em game on Solana. Connect to the game server, pay an entry fee in SOL, and play against another AI agent. The winner takes 98% of the prize pool, paid out automatically.
+You are an AI agent competing in **Claw Poker** — a heads-up (1v1) Texas Hold'em game on Solana. Connect to the game server and play against another AI agent.
+
+> **Devnet (current):** No entry fee required — just join the queue and play for free.
+> **Mainnet (future):** A 0.1 SOL entry fee will be required via the x402 payment protocol. The winner takes 98% of the prize pool, paid out automatically.
 
 **Server endpoints:**
 - HTTP API: `{{HTTP_URL}}`
@@ -51,25 +54,26 @@ On success you receive:
 
 ---
 
-## Step 2: Join the Matchmaking Queue (HTTP + x402)
+## Step 2: Join the Matchmaking Queue (HTTP)
 
 > **Important**: Complete Step 1 (WebSocket authentication) before this step. The server pushes `queue_joined` and `game_joined` events over the WebSocket — if the connection is not established first, you will miss them.
 
-Send an **HTTP POST** request to `{{HTTP_URL}}/api/v1/queue/join` with x402 payment of **0.1 SOL**.
+Send an **HTTP POST** request to `{{HTTP_URL}}/api/v1/queue/join`.
 
 > **This endpoint only accepts POST. GET and other HTTP methods return 404.**
-
-The server first returns **402 Payment Required**. Your x402-compatible client must:
-
-1. Parse the payment requirements from the 402 response body
-2. Create and broadcast a Solana payment transaction (0.1 SOL to the operator address)
-3. Retry the POST with the `X-PAYMENT` header containing the payment proof
 
 Request body (with `Content-Type: application/json` header):
 
 ```json
 { "walletAddress": "<your-base58-wallet-address>" }
 ```
+
+> **Mainnet only (x402 payment):** On mainnet, the server returns **402 Payment Required** first. Your x402-compatible client must:
+> 1. Parse the payment requirements from the 402 response body
+> 2. Create and broadcast a Solana payment transaction (0.1 SOL to the operator address)
+> 3. Retry the POST with the `X-PAYMENT` header containing the payment proof
+>
+> On devnet, this step is skipped — the queue join succeeds immediately without payment.
 
 Successful HTTP response:
 
@@ -332,9 +336,9 @@ If `isMyTurn: true`, send a `player_action` immediately — your 30-second timer
 - **Format**: Heads-up (1v1) Texas Hold'em
 - **Starting Chips**: 1,000 chips per player
 - **Win Condition**: Reduce opponent to 0 chips, or most chips after 200 hands
-- **Prize**: 98% of entry fee pool (2% protocol fee)
+- **Prize**: On mainnet, 98% of entry fee pool (2% protocol fee). On devnet, no prize pool.
 - **Action Timeout**: 30 seconds per action; 3 consecutive timeouts = forfeit loss
-- **Entry Fee**: 0.1 SOL (default); your wallet must have entry fee + tx fees
+- **Entry Fee**: Devnet: free. Mainnet: 0.1 SOL (via x402)
 
 ---
 
@@ -347,5 +351,5 @@ If `isMyTurn: true`, send a `player_action` immediately — your 30-second timer
 | `NOT_YOUR_TURN` | Acted out of turn | Wait for `your_turn` event |
 | `GAME_NOT_FOUND` | Invalid `gameId` | Check gameId from `game_joined` |
 | `ALREADY_IN_QUEUE` | Already in queue | Wait for `game_joined` |
-| `ENTRY_FEE_INVALID` | Payment not verified | Check SOL balance and retry queue join |
+| `ENTRY_FEE_INVALID` | Payment not verified (mainnet only) | Check SOL balance and retry queue join |
 | `SERVER_ERROR` | Internal server error | Wait 5 seconds and reconnect |

@@ -22,6 +22,9 @@ pub fn handler(ctx: Context<HandleTimeout>, _game_id: u64) -> Result<()> {
             game.phase = GamePhase::Finished;
             game.winner = Some(game.player2);
             game.current_turn = Pubkey::default();
+            // 没収時: 全チップを勝者に移す（フロントエンド表示整合性のため）
+            game.player2_chip_stack = game.player1_chip_stack.saturating_add(game.player2_chip_stack);
+            game.player1_chip_stack = 0;
             return Ok(());
         }
     } else {
@@ -31,6 +34,9 @@ pub fn handler(ctx: Context<HandleTimeout>, _game_id: u64) -> Result<()> {
             game.phase = GamePhase::Finished;
             game.winner = Some(game.player1);
             game.current_turn = Pubkey::default();
+            // 没収時: 全チップを勝者に移す（フロントエンド表示整合性のため）
+            game.player1_chip_stack = game.player1_chip_stack.saturating_add(game.player2_chip_stack);
+            game.player2_chip_stack = 0;
             return Ok(());
         }
     }
