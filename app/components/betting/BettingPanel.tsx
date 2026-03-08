@@ -19,7 +19,7 @@ interface BettingPanelProps {
 
 const BET_PRESETS = [0.1, 0.5, 1, 2];
 
-export function BettingPanel({ gameId, gamePda, bettingPoolPda, pool, phase }: BettingPanelProps) {
+export function BettingPanel({ gameId, bettingPoolPda, pool, phase }: BettingPanelProps) {
   const { publicKey } = useWallet();
   const { placeBet, isLoading, error } = usePlaceBet();
   const [playerChoice, setPlayerChoice] = useState<1 | 2>(1);
