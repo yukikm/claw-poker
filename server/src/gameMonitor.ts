@@ -61,6 +61,7 @@ export class GameMonitor {
     gamePda: PublicKey;
     onUpdate: (gameState: DecodedGameState) => Promise<void>;
     lastUpdateAt: number;
+    consecutiveFailures: number;
   }>();
 
   /** TEE接続リフレッシュ用コールバック（index.tsから注入） */
@@ -136,6 +137,7 @@ export class GameMonitor {
     this.subscriptions.set(gameId, {
       l1Sub, erSub, teeSub, teeConn: teeConnection,
       pollTimer, gamePda, onUpdate, lastUpdateAt: Date.now(),
+      consecutiveFailures: 0,
     });
 
     // onAccountChange はアカウントの「変化」のみ通知し、初期状態は通知しない。
@@ -453,6 +455,17 @@ export class GameMonitor {
     const sub = this.subscriptions.get(gameId);
     if (!sub) return;
 
+    // Exponential backoff: skip polls based on consecutive failure count
+    // failures=0: always poll, failures=1: skip 1, failures=2: skip 3, failures=3+: skip 7 (max ~24s gap)
+    if (sub.consecutiveFailures > 0) {
+      const skipCount = Math.min(2 ** sub.consecutiveFailures - 1, 7);
+      // Use lastUpdateAt as a simple skip counter proxy via modular arithmetic
+      const pollsSinceReset = Math.floor((Date.now() - sub.lastUpdateAt) / POLL_INTERVAL_MS);
+      if (pollsSinceReset % (skipCount + 1) !== 0) {
+        return; // skip this poll cycle
+      }
+    }
+
     // TEE接続がない場合はrefresherで再取得を試みる
     if (!sub.teeConn && this.teeConnectionRefresher) {
       try {
@@ -481,6 +494,7 @@ export class GameMonitor {
             await sub.onUpdate(state);
             return;
           }
+          sub.consecutiveFailures = 0;
           sub.lastUpdateAt = Date.now();
           console.log(`[GameMonitor] forcePoll: game ${gameId} phase=${state.phase} hand=${state.handNumber} turn=${state.currentTurn.slice(0, 8)}...`);
           await sub.onUpdate(state);
@@ -491,7 +505,11 @@ export class GameMonitor {
         console.warn(`[GameMonitor] forcePoll: account not found for game ${gameId}`);
       }
     } catch (err) {
-      console.error(`[GameMonitor] forcePoll failed for game ${gameId}:`, err);
+      sub.consecutiveFailures = Math.min(sub.consecutiveFailures + 1, 5);
+      // Log only on first failure and every 5th consecutive failure to reduce noise
+      if (sub.consecutiveFailures === 1 || sub.consecutiveFailures % 5 === 0) {
+        console.error(`[GameMonitor] forcePoll failed for game ${gameId} (failures=${sub.consecutiveFailures}):`, err);
+      }
       // TEE接続エラー時は次回ポーリングで再取得を試みるため、接続をクリアする
       sub.teeConn = undefined;
     }
