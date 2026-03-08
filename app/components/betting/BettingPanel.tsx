@@ -28,7 +28,7 @@ export function BettingPanel({ gameId, bettingPoolPda, pool, phase }: BettingPan
   const [validationError, setValidationError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  const isBettable = pool && !pool.isClosed && (phase === 'PreFlop' || phase === 'Flop' || phase === 'Turn' || phase === 'River');
+  const isBettable = pool && !pool.isClosed && phase !== 'Finished';
   const betLamports = Math.floor(parseFloat(betSol || '0') * LAMPORTS_PER_SOL);
 
   const { odds1, odds2 } = formatOdds(pool?.totalBetPlayer1 ?? 0, pool?.totalBetPlayer2 ?? 0);
