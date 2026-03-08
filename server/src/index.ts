@@ -723,30 +723,22 @@ async function onGameStateUpdate(
       const p1 = new PublicKey(player1Wallet);
       const p2 = new PublicKey(player2Wallet);
 
-      // ハンド決着に向かうブランチではBettingPoolを締め切る
-      const shouldCloseBetting = hasFold || isShowdown || state.bettingClosed;
-      if (shouldCloseBetting) {
-        try {
-          await anchorClient.closeBettingPool(gameId);
-        } catch (closeErr) {
-          // BettingClosed (6005) = already closed — expected when multiple events trigger close
-          const errStr = String(closeErr);
-          if (errStr.includes('6005') || errStr.includes('BettingClosed')) {
-            console.log(`[Crank] BettingPool already closed for game ${gameIdStr}`);
-          } else {
-            console.warn(`[Crank] closeBettingPool failed for game ${gameIdStr}:`, closeErr);
-          }
-        }
-      }
+      // BettingPoolはゲーム終了（handleGameComplete）までクローズしない。
+      // ゲーム中は常にベット可能とする。
 
       if (hasFold) {
         // Fold → settle_hand でハンド決着
         console.log(`[Crank] Game ${gameIdStr}: fold detected, settling hand`);
         await anchorClient.settleHand(gameId, p1, p2);
       } else if (isShowdown) {
-        // Showdown → reveal_showdown_cards → settle_hand
-        console.log(`[Crank] Game ${gameIdStr}: showdown, revealing cards and settling`);
+        // Showdown → reveal_showdown_cards → forcePoll(カード公開を配信) → settle_hand
+        console.log(`[Crank] Game ${gameIdStr}: showdown, revealing cards`);
         await anchorClient.revealShowdownCards(gameId, p1, p2);
+        // settle_handがshowdown_cardsをクリアする前にフロントエンドへ配信
+        await gameMonitor.forcePoll(gameIdStr);
+        // フロントエンドがShowdownカードを表示する時間を確保
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log(`[Crank] Game ${gameIdStr}: settling hand after showdown`);
         await anchorClient.settleHand(gameId, p1, p2);
       } else if (state.bettingClosed) {
         // AllInランアウト: 残りのコミュニティカードを全公開 → settle_hand
@@ -765,6 +757,9 @@ async function onGameStateUpdate(
         }
         // River + betting_closed → ショーダウンへ
         await anchorClient.revealShowdownCards(gameId, p1, p2);
+        // settle_handがshowdown_cardsをクリアする前にフロントエンドへ配信
+        await gameMonitor.forcePoll(gameIdStr);
+        await new Promise(resolve => setTimeout(resolve, 3000));
         await anchorClient.settleHand(gameId, p1, p2);
       } else {
         // 通常のベッティングラウンド終了 → 次のコミュニティカードを公開
@@ -1151,6 +1146,19 @@ async function handleGameComplete(
       }
     } else {
       console.warn(`[GameComplete] Game ${gameIdStr}: commit failed, skipping resolve (funds remain in vault)`);
+    }
+
+    // ゲーム終了時にBettingPoolをクローズ
+    try {
+      await anchorClient.closeBettingPool(gameId);
+      console.log(`[GameComplete] BettingPool closed for game ${gameIdStr}`);
+    } catch (closeErr) {
+      const errStr = String(closeErr);
+      if (errStr.includes('6005') || errStr.includes('BettingClosed')) {
+        console.log(`[GameComplete] BettingPool already closed for game ${gameIdStr}`);
+      } else {
+        console.warn(`[GameComplete] closeBettingPool failed for game ${gameIdStr}:`, closeErr);
+      }
     }
 
     // ゲーム終了理由を特定
