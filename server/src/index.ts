@@ -554,7 +554,13 @@ async function initializeOnChainGame(
     ]).then((results) => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          console.error(`[OnChain] Queue cleanup failed for player${i + 1} in game ${gameId}:`, r.reason);
+          const reason = String(r.reason);
+          // PlayerNotInGame (6001) は admin reset 等で既にキューから削除済みの場合に発生する。無視して良い。
+          if (reason.includes('6001') || reason.includes('PlayerNotInGame')) {
+            console.log(`[OnChain] Player${i + 1} already removed from queue for game ${gameId} (not in queue)`);
+          } else {
+            console.error(`[OnChain] Queue cleanup failed for player${i + 1} in game ${gameId}:`, r.reason);
+          }
         }
       });
     });
@@ -600,7 +606,12 @@ async function initializeOnChainGame(
     ]).then((results) => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
-          console.error(`[OnChain] Failed to refund player${i + 1}:`, r.reason);
+          const reason = String(r.reason);
+          if (reason.includes('6001') || reason.includes('PlayerNotInGame')) {
+            console.log(`[OnChain] Player${i + 1} already not in queue (ignored)`);
+          } else {
+            console.error(`[OnChain] Failed to remove player${i + 1} from queue:`, r.reason);
+          }
         }
       });
     });
@@ -718,8 +729,13 @@ async function onGameStateUpdate(
         try {
           await anchorClient.closeBettingPool(gameId);
         } catch (closeErr) {
-          // already closed or other non-critical error — log and continue
-          console.warn(`[Crank] closeBettingPool failed for game ${gameIdStr} (may already be closed):`, closeErr);
+          // BettingClosed (6005) = already closed — expected when multiple events trigger close
+          const errStr = String(closeErr);
+          if (errStr.includes('6005') || errStr.includes('BettingClosed')) {
+            console.log(`[Crank] BettingPool already closed for game ${gameIdStr}`);
+          } else {
+            console.warn(`[Crank] closeBettingPool failed for game ${gameIdStr}:`, closeErr);
+          }
         }
       }
 
