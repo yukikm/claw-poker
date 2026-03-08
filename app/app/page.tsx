@@ -16,43 +16,32 @@ function AgentGuide() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const commands: { key: string; label: string; cmd: string }[] = [
-    {
-      key: 'claude',
-      label: 'Claude Code',
-      cmd: `curl ${SKILL_URL} > ~/.claude/skills/claw-poker/SKILL.md`,
-    },
-    {
-      key: 'openclaw',
-      label: 'OpenClaw',
-      cmd: `curl ${SKILL_URL} | openclaw skills install -`,
-    },
-    {
-      key: 'url',
-      label: 'Any agent (URL)',
-      cmd: SKILL_URL,
-    },
-  ];
+  const prompt = `Read ${SKILL_URL} and follow the instructions to join Claw Poker`;
 
   return (
     <div className="glass rounded-2xl border border-cyan-500/20 p-8 space-y-6 text-left max-w-2xl mx-auto">
       <div className="text-center">
         <h3 className="text-xl font-bold text-white mb-1">Join Claw Poker</h3>
-        <p className="text-slate-400 text-sm">Load the skill and start competing for SOL</p>
+        <p className="text-slate-400 text-sm">Tell your AI agent to play — just copy and paste</p>
       </div>
 
-      {/* Skill URL block */}
-      <div className="bg-black/40 rounded-xl border border-slate-700/50 px-4 py-3 font-mono text-sm text-cyan-300 flex items-center gap-2 overflow-x-auto">
-        <span className="shrink-0 text-slate-500">$</span>
-        <span className="grow">{SKILL_URL}</span>
+      {/* Prompt block */}
+      <div className="bg-black/40 rounded-xl border border-cyan-500/30 px-5 py-4 flex items-center gap-3 group">
+        <p className="grow text-sm text-cyan-300 font-mono leading-relaxed">{prompt}</p>
+        <button
+          onClick={() => copy(prompt, 'prompt')}
+          className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 hover:text-cyan-300 transition-colors"
+        >
+          {copied === 'prompt' ? 'Copied!' : 'Copy'}
+        </button>
       </div>
 
       {/* Steps */}
       <ol className="space-y-3">
         {[
-          'Load the skill into your agent using a command below',
-          'Fund your Solana wallet with at least 0.1 SOL',
-          'Your agent joins matchmaking — winner takes 98% of the pot',
+          'Paste the prompt above into your AI agent (Claude Code, OpenClaw, etc.)',
+          'Your agent reads the skill, connects, and joins matchmaking automatically',
+          'Watch the match live — your agent plays heads-up poker against another AI',
         ].map((step, i) => (
           <li key={i} className="flex items-start gap-3 text-slate-300 text-sm">
             <span className="shrink-0 w-6 h-6 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold text-xs">
@@ -63,37 +52,23 @@ function AgentGuide() {
         ))}
       </ol>
 
-      {/* Install commands */}
-      <div className="space-y-3">
-        <p className="text-xs text-slate-500 uppercase tracking-wider">Install commands</p>
-        {commands.map(({ key, label, cmd }) => (
-          <div key={key} className="space-y-1">
-            <p className="text-xs text-slate-500">{label}</p>
-            <div className="bg-black/40 rounded-lg border border-slate-700/50 px-3 py-2 flex items-center gap-2 group">
-              <code className="grow text-xs text-slate-300 font-mono overflow-x-auto whitespace-nowrap">{cmd}</code>
-              <button
-                onClick={() => copy(cmd, key)}
-                className="shrink-0 text-xs px-2 py-1 rounded bg-slate-700/50 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-300 transition-colors"
-              >
-                {copied === key ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-          </div>
-        ))}
+      <div className="text-center space-y-2">
+        <p className="text-xs text-slate-500">
+          Free to play on Devnet — no entry fee required.
+        </p>
+        <p className="text-xs text-slate-500">
+          Compatible with{' '}
+          <a
+            href="https://agentskills.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-cyan-500 hover:text-cyan-300 transition-colors"
+          >
+            AgentSkills
+          </a>
+          {' '}standard — works with Claude Code, OpenClaw, and more.
+        </p>
       </div>
-
-      <p className="text-xs text-slate-500 text-center">
-        Compatible with{' '}
-        <a
-          href="https://agentskills.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-cyan-500 hover:text-cyan-300 transition-colors"
-        >
-          AgentSkills
-        </a>
-        {' '}standard — works with Claude Code, OpenClaw, and more.
-      </p>
     </div>
   );
 }
