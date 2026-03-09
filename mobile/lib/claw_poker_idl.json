@@ -1,0 +1,3773 @@
+{
+  "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo",
+  "metadata": {
+    "name": "claw_poker",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "callback_deal",
+      "discriminator": [
+        180,
+        17,
+        166,
+        178,
+        30,
+        59,
+        141,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "vrf_program_identity",
+          "docs": [
+            "VRF Program Identity — CPI認証: VRFプログラムのPDAがsignerであることを検証"
+          ],
+          "signer": true,
+          "address": "9irBy75QS2BN81FUgXuHcjqceJJRuc9oDkAe8TKVvvAw"
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cancel_game",
+      "docs": [
+        "Waitingフェーズのゲームをキャンセルし、Vault内の資金を両プレイヤーに返金する。",
+        "TEE delegation失敗やサーバークラッシュで停止したゲームのクリーンアップ用。"
+      ],
+      "discriminator": [
+        121,
+        194,
+        154,
+        118,
+        103,
+        235,
+        149,
+        52
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1",
+          "writable": true
+        },
+        {
+          "name": "player2",
+          "writable": true
+        },
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_betting_reward",
+      "discriminator": [
+        143,
+        248,
+        197,
+        93,
+        75,
+        115,
+        68,
+        41
+      ],
+      "accounts": [
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "bettor"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "bet_record"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close_betting_pool",
+      "discriminator": [
+        106,
+        107,
+        213,
+        179,
+        30,
+        148,
+        105,
+        114
+      ],
+      "accounts": [
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "commit_game",
+      "discriminator": [
+        212,
+        148,
+        56,
+        92,
+        60,
+        28,
+        179,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission_p1",
+          "writable": true
+        },
+        {
+          "name": "permission_p2",
+          "writable": true
+        },
+        {
+          "name": "permission_game",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_game_vault",
+      "discriminator": [
+        178,
+        203,
+        205,
+        32,
+        175,
+        193,
+        76,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "オペレーター: x402で受け取ったSOLを保持し、GameVaultに転送する"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_permission_game",
+      "discriminator": [
+        71,
+        77,
+        84,
+        247,
+        75,
+        18,
+        240,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_permission_player1",
+      "discriminator": [
+        135,
+        134,
+        103,
+        175,
+        166,
+        203,
+        37,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "game",
+          "docs": [
+            "Gameアカウント: operator pubkeyを読み取りACLに追加するために参照"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_permission_player2",
+      "discriminator": [
+        184,
+        45,
+        182,
+        162,
+        210,
+        125,
+        108,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "game",
+          "docs": [
+            "Gameアカウント: operator pubkeyを読み取りACLに追加するために参照"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_game",
+      "discriminator": [
+        116,
+        183,
+        70,
+        107,
+        112,
+        223,
+        122,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo"
+        },
+        {
+          "name": "validator"
+        },
+        {
+          "name": "buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_permission_game",
+      "discriminator": [
+        190,
+        127,
+        242,
+        142,
+        48,
+        168,
+        110,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "validator"
+        },
+        {
+          "name": "delegation_buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_permission_player1",
+      "discriminator": [
+        50,
+        46,
+        57,
+        57,
+        143,
+        94,
+        170,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "validator"
+        },
+        {
+          "name": "delegation_buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_permission_player2",
+      "discriminator": [
+        199,
+        103,
+        250,
+        236,
+        159,
+        227,
+        137,
+        13
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "validator"
+        },
+        {
+          "name": "delegation_buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_player1",
+      "discriminator": [
+        129,
+        205,
+        94,
+        115,
+        63,
+        132,
+        20,
+        89
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo"
+        },
+        {
+          "name": "validator"
+        },
+        {
+          "name": "buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_player2",
+      "discriminator": [
+        150,
+        3,
+        203,
+        111,
+        157,
+        98,
+        250,
+        58
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "6fSvbYjLzzqF6vZmcZ3rcFqw1hqbHAkskCNsCp7QCCAo"
+        },
+        {
+          "name": "validator"
+        },
+        {
+          "name": "buffer",
+          "writable": true
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "enter_matchmaking_queue",
+      "discriminator": [
+        222,
+        121,
+        183,
+        27,
+        168,
+        28,
+        129,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "matchmaking_queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  116,
+                  99,
+                  104,
+                  109,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "プレイヤーアカウント（署名不要、operatorが代理で呼び出す）"
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "オペレーター（x402支払い検証後にキュー登録を行う権限者）"
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "entry_fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "handle_timeout",
+      "discriminator": [
+        55,
+        38,
+        141,
+        178,
+        11,
+        84,
+        214,
+        227
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "timed_out_player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.current_turn",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_betting_pool",
+      "discriminator": [
+        18,
+        162,
+        166,
+        219,
+        194,
+        84,
+        8,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_game",
+      "discriminator": [
+        44,
+        62,
+        102,
+        247,
+        126,
+        208,
+        130,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "arg",
+                "path": "player1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "arg",
+                "path": "player2"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "player1",
+          "type": "pubkey"
+        },
+        {
+          "name": "player2",
+          "type": "pubkey"
+        },
+        {
+          "name": "buy_in",
+          "type": "u64"
+        },
+        {
+          "name": "operator",
+          "type": "pubkey"
+        },
+        {
+          "name": "platform_treasury",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_matchmaking_queue",
+      "discriminator": [
+        35,
+        157,
+        15,
+        144,
+        102,
+        101,
+        228,
+        239
+      ],
+      "accounts": [
+        {
+          "name": "matchmaking_queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  116,
+                  99,
+                  104,
+                  109,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "オペレーターアカウント（アクセス制御用）"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "operator",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "leave_matchmaking_queue",
+      "discriminator": [
+        245,
+        143,
+        12,
+        78,
+        94,
+        122,
+        249,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "matchmaking_queue",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  116,
+                  99,
+                  104,
+                  109,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  113,
+                  117,
+                  101,
+                  117,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "オペレーターが代理でキュー離脱を実行する"
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "place_spectator_bet",
+      "discriminator": [
+        55,
+        208,
+        18,
+        231,
+        14,
+        163,
+        75,
+        83
+      ],
+      "accounts": [
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  95,
+                  114,
+                  101,
+                  99,
+                  111,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "bettor"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "player_choice",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "player_action",
+      "discriminator": [
+        37,
+        85,
+        25,
+        135,
+        200,
+        116,
+        96,
+        101
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "The TEE operator signs transactions on behalf of players in the Private Ephemeral Rollup."
+          ],
+          "relations": [
+            "player_state"
+          ]
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "TEE operator signs on behalf of the player (MagicBlock PER pattern).",
+            "Authorized by game.operator constraint above."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "action",
+          "type": {
+            "defined": {
+              "name": "PlayerAction"
+            }
+          }
+        },
+        {
+          "name": "amount",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "request_shuffle",
+      "discriminator": [
+        130,
+        20,
+        53,
+        22,
+        23,
+        102,
+        225,
+        135
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player1_state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "client_seed",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "resolve_game",
+      "discriminator": [
+        25,
+        119,
+        183,
+        229,
+        196,
+        69,
+        169,
+        79
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "docs": [
+            "owner制約で明示し、直接lamport操作の正当性を保証する。"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winner",
+          "writable": true
+        },
+        {
+          "name": "platform_treasury",
+          "writable": true
+        },
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "reveal_community_cards",
+      "discriminator": [
+        116,
+        73,
+        53,
+        59,
+        215,
+        115,
+        30,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "phase",
+          "type": {
+            "defined": {
+              "name": "GamePhase"
+            }
+          }
+        },
+        {
+          "name": "board_cards",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "reveal_showdown_cards",
+      "discriminator": [
+        201,
+        11,
+        103,
+        95,
+        65,
+        26,
+        250,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "name": "player1_state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "settle_hand",
+      "discriminator": [
+        226,
+        143,
+        58,
+        196,
+        148,
+        75,
+        164,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "start_new_hand",
+      "discriminator": [
+        168,
+        38,
+        234,
+        137,
+        235,
+        82,
+        172,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "test_shuffle_and_deal",
+      "docs": [
+        "VRFオラクルを経由せずデッキをシャッフルする（フォールバック用）。",
+        "Private ER（TEE）ではVRF oracle CPIが利用不可のため、",
+        "WaitingまたはShufflingフェーズからオペレーターが直接呼び出す。",
+        "セキュリティ: operator制約によりオペレーターのみ呼び出し可能。"
+      ],
+      "discriminator": [
+        4,
+        131,
+        130,
+        107,
+        57,
+        224,
+        141,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player1_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player1",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player2_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "game.player2",
+                "account": "Game"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "random_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BetRecord",
+      "discriminator": [
+        144,
+        217,
+        102,
+        109,
+        200,
+        164,
+        66,
+        178
+      ]
+    },
+    {
+      "name": "BettingPool",
+      "discriminator": [
+        59,
+        136,
+        47,
+        53,
+        37,
+        99,
+        87,
+        104
+      ]
+    },
+    {
+      "name": "Game",
+      "discriminator": [
+        27,
+        90,
+        166,
+        125,
+        74,
+        100,
+        121,
+        18
+      ]
+    },
+    {
+      "name": "MatchmakingQueue",
+      "discriminator": [
+        255,
+        123,
+        198,
+        201,
+        75,
+        236,
+        165,
+        103
+      ]
+    },
+    {
+      "name": "PlayerState",
+      "discriminator": [
+        56,
+        3,
+        60,
+        86,
+        174,
+        16,
+        244,
+        195
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "GameCancelled",
+      "discriminator": [
+        113,
+        20,
+        200,
+        104,
+        76,
+        35,
+        9,
+        241
+      ]
+    },
+    {
+      "name": "VrfFallbackUsed",
+      "discriminator": [
+        178,
+        15,
+        149,
+        70,
+        137,
+        89,
+        188,
+        40
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "GameNotFound",
+      "msg": "Game not found"
+    },
+    {
+      "code": 6001,
+      "name": "PlayerNotInGame",
+      "msg": "Player is not in this game"
+    },
+    {
+      "code": 6002,
+      "name": "NotYourTurn",
+      "msg": "It is not your turn"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidAction",
+      "msg": "Invalid action for the current game state"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientChips",
+      "msg": "Insufficient chips for this action"
+    },
+    {
+      "code": 6005,
+      "name": "BettingClosed",
+      "msg": "Betting is closed (all-in occurred)"
+    },
+    {
+      "code": 6006,
+      "name": "GameAlreadyCompleted",
+      "msg": "Game has already been completed"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidRaise",
+      "msg": "Raise amount is less than the minimum"
+    },
+    {
+      "code": 6008,
+      "name": "QueueFull",
+      "msg": "Matchmaking queue is full"
+    },
+    {
+      "code": 6009,
+      "name": "AlreadyInQueue",
+      "msg": "Player is already in the queue"
+    },
+    {
+      "code": 6010,
+      "name": "EntryFeeInsufficient",
+      "msg": "Entry fee is below the minimum required"
+    },
+    {
+      "code": 6011,
+      "name": "PotOverflow",
+      "msg": "Pot calculation overflow"
+    },
+    {
+      "code": 6012,
+      "name": "PermissionDenied",
+      "msg": "Permission denied"
+    },
+    {
+      "code": 6013,
+      "name": "GameNotYetCompleted",
+      "msg": "Game has not yet been completed"
+    },
+    {
+      "code": 6014,
+      "name": "TimeoutNotReached",
+      "msg": "Action timeout has not been reached yet"
+    }
+  ],
+  "types": [
+    {
+      "name": "BetRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "docs": [
+              "関連するゲームID"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bettor",
+            "docs": [
+              "ベッターのウォレットアドレス"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "player_choice",
+            "docs": [
+              "賭け先（1=Player1, 2=Player2）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "ベット額（lamports）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "claimed",
+            "docs": [
+              "報酬受取済みフラグ"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDAバンプ"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BettingPool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "docs": [
+              "関連するゲームID"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "オペレーター（initialize時にgame.operatorからコピー）"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "total_bet_player1",
+            "docs": [
+              "Player 1に賭けられた総額（lamports）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_bet_player2",
+            "docs": [
+              "Player 2に賭けられた総額（lamports）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "is_closed",
+            "docs": [
+              "ベット受付終了フラグ（オールイン発生時にtrue）"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "winner",
+            "docs": [
+              "勝者（ゲーム終了後に設定）"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "distributed",
+            "docs": [
+              "配当分配完了フラグ"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bet_count",
+            "docs": [
+              "総ベット数"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDAバンプ"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Game",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "docs": [
+              "ゲーム識別子（u64）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "オペレーター（TEE/PERオペレーター）のアドレス"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "platform_treasury",
+            "docs": [
+              "プラットフォーム手数料受取先（initialize_gameで固定）"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "player1",
+            "docs": [
+              "Player 1のウォレットアドレス"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "player2",
+            "docs": [
+              "Player 2のウォレットアドレス"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "buy_in",
+            "docs": [
+              "参加費（lamports単位）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pot",
+            "docs": [
+              "現在のポット合計（チップ単位）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "current_turn",
+            "docs": [
+              "現在のターンを持つプレイヤー"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "phase",
+            "docs": [
+              "現在のゲームフェーズ"
+            ],
+            "type": {
+              "defined": {
+                "name": "GamePhase"
+              }
+            }
+          },
+          {
+            "name": "board_cards",
+            "docs": [
+              "コミュニティカード（0-51エンコード、未公開は255）"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                5
+              ]
+            }
+          },
+          {
+            "name": "deck_commitment",
+            "docs": [
+              "VRFシャッフル用コミットメント（SHA256(deck_seed)）"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "player1_committed",
+            "docs": [
+              "Player 1の現ラウンドのコミット額"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "player2_committed",
+            "docs": [
+              "Player 2の現ラウンドのコミット額"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "hand_number",
+            "docs": [
+              "現在のハンド番号（1始まり、shuffle_and_dealでインクリメント）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dealer_position",
+            "docs": [
+              "ディーラー位置（0=Player1がSB/ディーラー, 1=Player2がSB/ディーラー）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "current_small_blind",
+            "docs": [
+              "現在のスモールブラインド額（チップ単位）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "current_big_blind",
+            "docs": [
+              "現在のビッグブラインド額（チップ単位）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "player1_chip_stack",
+            "docs": [
+              "Player1の総チップ数（ゲーム通算、chip_conservation invariant: p1+p2==2000）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "player2_chip_stack",
+            "docs": [
+              "Player2の総チップ数（ゲーム通算）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "consecutive_timeouts_p1",
+            "docs": [
+              "Player1の連続タイムアウト回数（3回で没収）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "consecutive_timeouts_p2",
+            "docs": [
+              "Player2の連続タイムアウト回数（3回で没収）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "last_raise_amount",
+            "docs": [
+              "最後のレイズ額（ミニマムレイズ計算用）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_checkpoint_hand",
+            "docs": [
+              "最後にL1チェックポイントしたハンド番号（50ハンドごとにcommit）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "winner",
+            "docs": [
+              "勝者（決定前はNone）"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "betting_closed",
+            "docs": [
+              "オールイン発生でtrueになり、観戦者ベットを締め切る"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "street_action_taken",
+            "docs": [
+              "現ストリートで最初のアクションが発生したかを追跡",
+              "（River Check-Check誤Showdown遷移防止用）"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "last_action_at",
+            "docs": [
+              "最後にプレイヤーがアクションを行った時刻（Unix timestamp）"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "ゲーム作成時刻（Unix timestamp）"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "showdown_cards_p1",
+            "docs": [
+              "All-in showdown時に公開するPlayer1のホールカード（未公開時は[255, 255]）"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "showdown_cards_p2",
+            "docs": [
+              "All-in showdown時に公開するPlayer2のホールカード（未公開時は[255, 255]）"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "player1_has_folded",
+            "docs": [
+              "Player1がフォールドしたか（ハンド終了時にリセット）"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "player2_has_folded",
+            "docs": [
+              "Player2がフォールドしたか（ハンド終了時にリセット）"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "player1_is_all_in",
+            "docs": [
+              "Player1がオールインしたか（ハンド終了時にリセット）"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "player2_is_all_in",
+            "docs": [
+              "Player2がオールインしたか（ハンド終了時にリセット）"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "deal_cards",
+            "docs": [
+              "callback_dealで設定されるコミュニティカード候補（burn1, flop*3, burn2, turn, burn3, river）",
+              "サーバーがreveal_community_cardsに渡すカード値の参照元。",
+              "settle_handで[255; 8]にリセットされる。"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDAバンプ"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GamePhase",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Waiting"
+          },
+          {
+            "name": "Shuffling"
+          },
+          {
+            "name": "PreFlop"
+          },
+          {
+            "name": "Flop"
+          },
+          {
+            "name": "Turn"
+          },
+          {
+            "name": "River"
+          },
+          {
+            "name": "Showdown"
+          },
+          {
+            "name": "Finished"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchmakingQueue",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue",
+            "docs": [
+              "キューエントリー（固定サイズ、最大10名）"
+            ],
+            "type": {
+              "array": [
+                {
+                  "option": {
+                    "defined": {
+                      "name": "QueueEntry"
+                    }
+                  }
+                },
+                10
+              ]
+            }
+          },
+          {
+            "name": "head",
+            "docs": [
+              "リングバッファのヘッド位置（将来の最適化用、現在は未使用）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "tail",
+            "docs": [
+              "リングバッファのテール位置（将来の最適化用、現在は未使用）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDAバンプ"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "オペレーター（アクセス制御用）"
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerAction",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fold"
+          },
+          {
+            "name": "Check"
+          },
+          {
+            "name": "Call"
+          },
+          {
+            "name": "Bet"
+          },
+          {
+            "name": "Raise"
+          },
+          {
+            "name": "AllIn"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "docs": [
+              "関連するゲームID"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "docs": [
+              "プレイヤーのウォレットアドレス"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hole_cards",
+            "docs": [
+              "ホールカード（0-51エンコード）"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "chip_stack",
+            "docs": [
+              "総チップ数（ゲーム通算の手持ち。初期値=1000）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "chips_committed",
+            "docs": [
+              "現ラウンドでコミットしたチップ量（新ラウンド開始時にリセット）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "chips_in_pot_this_hand",
+            "docs": [
+              "今ハンドのポットへの累計投入量（settle_hand後にリセット）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "is_folded",
+            "docs": [
+              "フォールド済みフラグ"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "is_all_in",
+            "docs": [
+              "オールインフラグ"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDAバンプ"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "docs": [
+              "プレイヤーのウォレットアドレス"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "entry_fee_paid",
+            "docs": [
+              "支払い済み参加費（lamports）"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "joined_at",
+            "docs": [
+              "キュー参加時刻（Unix timestamp）"
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VrfFallbackUsed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "hand_number",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

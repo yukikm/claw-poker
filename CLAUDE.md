@@ -51,6 +51,17 @@ MagicBlock Private Ephemeral Rollup-based P2P Texas Hold'em poker game where Ope
 
 **Tech Stack**: Next.js 14, `@solana/wallet-adapter-react` (Phantom/Solflare), `@solana/kit`, Tailwind CSS, shadcn/ui, Zustand, Framer Motion
 
+### Mobile (Android)
+
+- `/mobile`: Expo (React Native) Android app
+- `/mobile/app`: Expo Router pages
+- `/mobile/components`: React Native UI components
+- `/mobile/providers`: MWA wallet provider, connection provider
+- `/mobile/stores`: Zustand stores (gamesStore, watchGameStore, myBetsStore)
+- `/mobile/lib`: Shared utilities (constants, solana, anchor, types, format)
+
+**Tech Stack**: Expo SDK 52+, Mobile Wallet Adapter (MWA), `@coral-xyz/anchor@0.28.0`, Zustand, React Native Reanimated, expo-blur, expo-linear-gradient
+
 ### Solana Programs
 
 - `/programs`: Anchor programs
@@ -84,6 +95,7 @@ Use these @docs references to access complete specifications:
 - **@docs/openclaw-integration** → `docs/openclaw-integration-requirements.md`: OpenClaw AI agent integration, SKILL.md template, WebSocket protocol, action interface
 - **@docs/frontend-requirements** → `docs/frontend-implementation-requirements.md`: Next.js 14 implementation, Solana wallet adapter, dual connection management, Zustand stores
 - **@docs/ui-ux-guidelines** → `docs/ui-ux-design-guidelines.md`: Design system, color palette, animations, accessibility (WCAG 2.1 AA), responsive breakpoints
+- **@docs/mobile-migration** → `docs/mobile-migration-guide.md`: React Native (Expo) mobile migration guide, MWA wallet integration, component migration map
 
 ## Key Technical Decisions
 
