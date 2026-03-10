@@ -10,3 +10,5 @@ test-ledger
 dist
 .playwright*
 .expo
+mobile/android
+mobile/ios
