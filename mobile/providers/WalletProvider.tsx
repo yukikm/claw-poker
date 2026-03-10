@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { transact, type Web3MobileWallet } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
 import { PublicKey, type Transaction, type VersionedTransaction } from '@solana/web3.js';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const bs58 = require('bs58') as { encode: (data: Uint8Array) => string };
 import * as SecureStore from 'expo-secure-store';
 
 interface WalletContextType {
@@ -112,7 +114,13 @@ export function MobileWalletProvider({ children }: { children: ReactNode }) {
         });
         return auth;
       });
-      const address = new PublicKey(result.accounts[0].address);
+      // MWA returns address as base64-encoded 32-byte public key
+      const rawAddress = result.accounts[0].address;
+      const address = new PublicKey(
+        typeof rawAddress === 'string'
+          ? Buffer.from(rawAddress, 'base64')
+          : new Uint8Array(rawAddress)
+      );
       setPublicKey(address);
       setAuthToken(result.auth_token);
       authTokenRef.current = result.auth_token;
@@ -153,13 +161,18 @@ export function MobileWalletProvider({ children }: { children: ReactNode }) {
   );
 
   const signAndSendTransaction = useCallback(
-    async (tx: Transaction | VersionedTransaction) => {
+    async (tx: Transaction | VersionedTransaction): Promise<string> => {
       return await transactWithTimeout(async (wallet: Web3MobileWallet) => {
         await reauthorize(wallet);
         const signatures = await wallet.signAndSendTransactions({
           transactions: [tx],
         });
-        return signatures[0];
+        const sig = signatures[0];
+        // MWA returns Uint8Array signatures - convert to base58 string
+        if (typeof sig !== 'string') {
+          return bs58.encode(new Uint8Array(sig as ArrayLike<number>));
+        }
+        return sig;
       });
     },
     [reauthorize]

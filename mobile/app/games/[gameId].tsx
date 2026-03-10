@@ -13,16 +13,13 @@ import { BettingPanel } from '../../components/betting/BettingPanel';
 export default function GameDetailScreen() {
   const { gameId: gameIdParam } = useLocalSearchParams<{ gameId: string }>();
   const { game, bettingPool, isLoading, subscribeToGame, unsubscribeFromGame } = useWatchGameStore();
-  const { games, fetchGames, isLoading: gamesLoading } = useGamesStore();
+  const { fetchGames } = useGamesStore();
   const { connection } = useConnection();
   const programId = getProgramId();
   const connectionRef = useRef(connection);
   connectionRef.current = connection;
   const [notFound, setNotFound] = useState(false);
-  // Track whether we already subscribed to avoid re-subscribing on every games update
-  const subscribedRef = useRef<string | null>(null);
-  // Track whether we already triggered a fallback fetch
-  const fetchTriggeredRef = useRef(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     if (!gameIdParam) return;
@@ -36,50 +33,43 @@ export default function GameDetailScreen() {
       return;
     }
 
-    // Already subscribed to this game - skip
-    if (subscribedRef.current === gameIdParam) return;
-
-    const gameSummary = games.find((g) => g.gamePda.toBase58() === gameIdParam);
+    // Read games snapshot once (not reactive - avoids re-subscribe on every poll)
+    const currentGames = useGamesStore.getState().games;
+    const gameSummary = currentGames.find((g) => g.gamePda.toBase58() === gameIdParam);
 
     if (gameSummary) {
-      subscribedRef.current = gameIdParam;
       setNotFound(false);
-      fetchTriggeredRef.current = false;
       subscribeToGame(
         gamePda,
         gameSummary.bettingPoolPda,
         programId,
         gameSummary.gameId.toString()
       );
-    } else if (!gamesLoading && !fetchTriggeredRef.current) {
-      // Games loaded but this game not found - trigger a fresh fetch
-      fetchTriggeredRef.current = true;
+    } else {
+      // Games not yet loaded or game not found - fetch and retry
       fetchGames(connectionRef.current, programId).then(() => {
-        // After fetch, check again - if still not found, show error
         const found = useGamesStore.getState().games.find(
           (g) => g.gamePda.toBase58() === gameIdParam
         );
-        if (!found) {
+        if (found) {
+          setNotFound(false);
+          subscribeToGame(
+            gamePda,
+            found.bettingPoolPda,
+            programId,
+            found.gameId.toString()
+          );
+        } else {
           setNotFound(true);
         }
       });
     }
 
     return () => {
-      if (subscribedRef.current === gameIdParam) {
-        subscribedRef.current = null;
-        unsubscribeFromGame();
-      }
+      unsubscribeFromGame();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameIdParam, games, programId, gamesLoading, subscribeToGame, unsubscribeFromGame, fetchGames]);
-
-  // Reset refs when gameIdParam changes
-  useEffect(() => {
-    subscribedRef.current = null;
-    fetchTriggeredRef.current = false;
-    setNotFound(false);
-  }, [gameIdParam]);
+  }, [gameIdParam, programId, retryCount]);
 
   if (notFound) {
     return (
@@ -89,7 +79,7 @@ export default function GameDetailScreen() {
           style={styles.retryBtn}
           onPress={() => {
             setNotFound(false);
-            fetchTriggeredRef.current = false;
+            setRetryCount((c) => c + 1);
           }}
           accessibilityRole="button"
           accessibilityLabel="Retry loading game"

@@ -39,8 +39,8 @@ jest.mock('expo-linking', () => ({
   parse: jest.fn(() => ({ path: '', queryParams: {} })),
 }));
 
-// Mock react-native-quick-crypto
-jest.mock('react-native-quick-crypto', () => ({
+// Mock crypto-browserify
+jest.mock('crypto-browserify', () => ({
   createHash: jest.fn(),
   randomBytes: jest.fn(),
 }));
